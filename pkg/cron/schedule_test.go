@@ -228,3 +228,26 @@ func TestSchedule_String(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedule_Function(t *testing.T) {
+	var tests = []struct {
+		schedule Schedule
+		wanted   string
+	}{
+		{Yearly(), "0 0 1 1 *"},
+		{Monthly(), "0 0 1 * *"},
+		{Weekly(), "0 0 * * 0"},
+		{Daily(), "0 0 * * *"},
+		{Hourly(), "0 * * * *"},
+		{EveryMinute(), "* * * * *"},
+		{EverySecond(), "* * * * * *"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.schedule.String(), func(t *testing.T) {
+			if tt.schedule.String() != tt.wanted {
+				t.Errorf("unexpected output for %s, expected %s", tt.schedule.String(), tt.wanted)
+			}
+		})
+	}
+}

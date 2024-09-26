@@ -51,6 +51,41 @@ var cronTemplates = map[string]string{
 	"@everysecond": "* * * * * *",
 }
 
+func Yearly() Schedule {
+	s, _ := NewSchedule("@yearly")
+	return s
+}
+
+func Monthly() Schedule {
+	s, _ := NewSchedule("@monthly")
+	return s
+}
+
+func Weekly() Schedule {
+	s, _ := NewSchedule("@weekly")
+	return s
+}
+
+func Daily() Schedule {
+	s, _ := NewSchedule("@daily")
+	return s
+}
+
+func Hourly() Schedule {
+	s, _ := NewSchedule("@hourly")
+	return s
+}
+
+func EveryMinute() Schedule {
+	s, _ := NewSchedule("@everyminute")
+	return s
+}
+
+func EverySecond() Schedule {
+	s, _ := NewSchedule("@everysecond")
+	return s
+}
+
 func NewSchedule(expression string) (Schedule, error) {
 	s := Schedule{
 		expression: expression,
