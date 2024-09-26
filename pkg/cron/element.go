@@ -40,7 +40,7 @@ type element struct {
 	q          qualification
 }
 
-func (e *element) isDue(inputs []int, t int) bool {
+func (e *element) isDue(t int, inputs []int) bool {
 	if len(inputs) == 0 {
 		return false
 	}
@@ -114,7 +114,9 @@ func (e *element) parseExpression() ([]int, error) {
 		s = strings.Split(e.expression, "*/")
 		output = make([]int, 1)
 		// Error handling is not required, as qualification is already parsed and step is an int
-		output[0], _ = strconv.Atoi(s[0])
+		if output[0], err = strconv.Atoi(s[1]); err != nil {
+			return output, err
+		}
 	}
 
 	// If there are multiple values, check if they are ascending
@@ -170,7 +172,7 @@ func (e *element) trigger(t time.Time) bool {
 	case positionYear:
 		input = t.Year()
 	}
-	return e.isDue(intervals, input)
+	return e.isDue(input, intervals)
 }
 
 func (e *element) validate() error {

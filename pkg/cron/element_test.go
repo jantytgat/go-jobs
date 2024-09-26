@@ -486,7 +486,7 @@ func TestElement_isDueValid(t *testing.T) {
 			e := element{
 				q: tt.q,
 			}
-			if !e.isDue(tt.inputs, tt.t) {
+			if !e.isDue(tt.t, tt.inputs) {
 				t.Errorf("expected true for %d", tt.t)
 			}
 		})
@@ -522,7 +522,7 @@ func TestElement_isDueInvalid(t *testing.T) {
 			e := element{
 				q: tt.q,
 			}
-			if e.isDue(tt.inputs, tt.t) {
+			if e.isDue(tt.t, tt.inputs) {
 				t.Errorf("expected false for %d", tt.t)
 			}
 		})
