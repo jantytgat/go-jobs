@@ -38,6 +38,7 @@ func TestNewSchedule(t *testing.T) {
 	}
 }
 
+// TODO improve test cases to include range, multi, step
 func TestSchedule_IsDueValid(t *testing.T) {
 	var tests = []struct {
 		expression string
