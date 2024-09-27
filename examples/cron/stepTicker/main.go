@@ -17,7 +17,14 @@ func main() {
 		panic(err)
 	}
 	chOut := make(chan time.Time)
-	ticker := cron.NewTicker(ctx, schedule, chOut)
+
+	maxTickers := 1000
+	tickers := make([]*cron.Ticker, maxTickers)
+
+	for i := 0; i < maxTickers; i++ {
+		tickers[i] = cron.NewTicker(ctx, schedule, chOut)
+	}
+	// ticker := cron.NewTicker(ctx, schedule, chOut)
 
 	go func() {
 		for {
@@ -30,8 +37,11 @@ func main() {
 		}
 	}()
 
-	// Start ticker
-	ticker.Start()
+	// start ticker
+	for i := 0; i < maxTickers; i++ {
+		tickers[i].Start()
+	}
+	// ticker.Start()
 	time.Sleep(20*time.Second + 1)
 	cancel()
 }
