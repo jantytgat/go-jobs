@@ -409,6 +409,12 @@ func TestElement_parseExpressionValid(t *testing.T) {
 		expression string
 		q          qualification
 	}{
+		{"*", qualificationNone},
+		{"0", qualificationNone},
+		{"0,20", qualificationNone},
+		{"0-20", qualificationNone},
+		{"*/2", qualificationNone},
+
 		{"*", qualificationSimple},
 		{"0", qualificationSimple},
 
@@ -418,7 +424,8 @@ func TestElement_parseExpressionValid(t *testing.T) {
 		{"0,20,31,100", qualificationMulti},
 
 		{"0-200", qualificationRange},
-		{"0-200", qualificationRange},
+
+		{"*/2", qualificationStep},
 	}
 
 	for _, tt := range tests {
@@ -439,13 +446,24 @@ func TestElement_parseExpressionInvalid(t *testing.T) {
 		expression string
 		q          qualification
 	}{
+		{"a", qualificationNone},
+
 		{"a", qualificationSimple},
 
 		{"0,a,31,100", qualificationMulti},
 		{"0,20,31,*", qualificationMulti},
+		{"0,31,20", qualificationMulti},
 
+		{"200-100", qualificationRange},
 		{"0-a", qualificationRange},
 		{"a-200", qualificationRange},
+		{"*-200", qualificationRange},
+		{"200-*", qualificationRange},
+
+		{"*/a", qualificationStep},
+		{"*/*", qualificationStep},
+		{"100/a", qualificationStep},
+		{"10/*", qualificationStep},
 	}
 
 	for _, tt := range tests {
@@ -579,20 +597,27 @@ func TestElement_TriggerInvalid(t *testing.T) {
 		expression string
 	}{
 		{positionSecond, "6"},
+		{positionSecond, "a"},
 
 		{positionMinute, "9"},
+		{positionMinute, "a"},
 
 		{positionHour, "18"},
+		{positionHour, "a"},
 
 		{positionDay, "5"},
+		{positionDay, "a"},
 
 		{positionMonth, "9"},
+		{positionMonth, "a"},
 
 		{positionWeekday, "2"},
+		{positionWeekday, "a"},
 
 		{positionYear, "1"},
 		{positionYear, "22"},
 		{positionYear, "333"},
+		{positionYear, "a"},
 	}
 
 	// INPUT TIME: Monday, January 2, 2006, at 15:04:05
@@ -600,10 +625,7 @@ func TestElement_TriggerInvalid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.p.String()+tt.expression, func(t *testing.T) {
-			e, err := newElement(tt.expression, tt.p)
-			if err != nil {
-				t.Errorf("invalid element for %s with expression %s", tt.p.String(), tt.expression)
-			}
+			e, _ := newElement(tt.expression, tt.p) // no need for error handling, we know the expression is invalid
 
 			if e.trigger(i) {
 				t.Errorf("expected false for value %s with expression %s", i.String(), tt.expression)

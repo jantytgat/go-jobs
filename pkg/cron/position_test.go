@@ -5,7 +5,7 @@ import "testing"
 func TestElementType_String(t *testing.T) {
 	var (
 		result []string
-		wanted = []string{"second", "minute", "hour", "day", "month", "weekday", "year"}
+		wanted = positionStrings
 	)
 
 	for i := 0; i < len(wanted); i++ {

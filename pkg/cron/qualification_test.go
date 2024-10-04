@@ -5,7 +5,7 @@ import "testing"
 func TestExpressionType_String(t *testing.T) {
 	var (
 		result []string
-		wanted = []string{"invalid", "simple", "multi", "range", "step"}
+		wanted = qualificationStrings
 	)
 
 	for i := 0; i < len(wanted); i++ {
