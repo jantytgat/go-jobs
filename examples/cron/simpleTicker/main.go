@@ -27,10 +27,10 @@ func main() {
 		}
 	}()
 
-	// Start ticker
+	// start ticker
 	ticker.Start()
 
-	// Stop ticker after 5 seconds
+	// stop ticker after 5 seconds
 	time.Sleep(5 * time.Second)
 	ticker.Stop()
 

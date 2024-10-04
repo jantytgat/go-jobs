@@ -41,7 +41,7 @@ func main() {
 	for i := 0; i < maxTickers; i++ {
 		tickers[i].Start()
 	}
-	// ticker.Start()
+	// ticker.start()
 	time.Sleep(20*time.Second + 1)
 	cancel()
 }

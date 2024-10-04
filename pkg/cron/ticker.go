@@ -21,7 +21,7 @@ func NewTicker(ctx context.Context, s Schedule, chTrigger chan<- time.Time) *Tic
 }
 
 // Ticker creates a cron ticker that will send the current time to the output channel when the schedule is due.
-// It can be controlled using the Start() and Stop() functions, or by cancelling the parent context.
+// It can be controlled using the start() and stop() functions, or by cancelling the parent context.
 type Ticker struct {
 	ctx          context.Context
 	tickerCancel context.CancelFunc
@@ -32,8 +32,26 @@ type Ticker struct {
 	mux sync.RWMutex
 }
 
-// Start the cron ticker.
-func (t *Ticker) Start() error {
+func (t *Ticker) Start() {
+	_ = t.start()
+}
+
+func (t *Ticker) Stop() {
+	_ = t.stop()
+}
+
+func (t *Ticker) monitor() {
+	for {
+		select {
+		case <-t.ctx.Done():
+			_ = t.stop()
+			return
+		}
+	}
+}
+
+// start the cron ticker.
+func (t *Ticker) start() error {
 	t.mux.Lock()
 	defer t.mux.Unlock()
 	if t.tickerCancel != nil { // if tickerCancel is not nil, the tick goroutine is already running
@@ -48,12 +66,12 @@ func (t *Ticker) Start() error {
 	return nil
 }
 
-// Stop the cron ticker.
-func (t *Ticker) Stop() error {
+// stop the cron ticker.
+func (t *Ticker) stop() error {
 	t.mux.Lock()
 	defer t.mux.Unlock()
 
-	if t.tickerCancel == nil { // if tickerCancel is nil, Start() has never been called
+	if t.tickerCancel == nil { // if tickerCancel is nil, start() has never been called
 		return fmt.Errorf("ticker already stopped")
 	}
 
@@ -62,17 +80,7 @@ func (t *Ticker) Stop() error {
 	return nil
 }
 
-func (t *Ticker) monitor() {
-	for {
-		select {
-		case <-t.ctx.Done():
-			_ = t.Stop()
-			return
-		}
-	}
-}
-
-// tick is the function called by Start to initiate the goroutine
+// tick is the function called by start to initiate the goroutine
 func tick(ctx context.Context, s Schedule, chTrigger chan<- time.Time) {
 	ticker := time.NewTicker(tickerInterval)
 	var exit bool
