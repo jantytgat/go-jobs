@@ -1,4 +1,4 @@
-package library
+package taskLibrary
 
 import (
 	"context"
@@ -13,9 +13,7 @@ const (
 	emptyTaskHandlerDefaultTimeout = time.Duration(1) * time.Second
 )
 
-type EmptyTask struct {
-	Message string
-}
+type EmptyTask struct{}
 
 func (t EmptyTask) Name() string {
 	return emptyTaskName
