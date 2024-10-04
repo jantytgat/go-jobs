@@ -1,18 +1,5 @@
 package task
 
-type Status int
-
-func (s Status) String() string {
-	return [...]string{
-		"none",
-		"pending",
-		"success",
-		"canceled",
-		"error",
-	}[s]
-
-}
-
 const (
 	StatusNone Status = iota
 	StatusPending
@@ -20,3 +7,12 @@ const (
 	StatusCanceled
 	StatusError
 )
+
+var StatusStrings = []string{"none", "pending", "success", "canceled", "error"}
+
+type Status int
+
+func (s Status) String() string {
+	return StatusStrings[s]
+
+}

@@ -27,8 +27,14 @@ func (r *HandlerRepository) Execute(ctx context.Context, t HandlerTask) error {
 		}
 	}
 
-	handlerPool.ChHandlerTask <- t
+	handlerPool.ChTasks <- t
 	return nil
+}
+
+func (r *HandlerRepository) RegisterHandlerPools(p []*HandlerPool) {
+	for _, handlerPool := range p {
+		r.registerHandlerPool(handlerPool)
+	}
 }
 
 func (r *HandlerRepository) Statistics() map[string]HandlerPoolStatistics {
@@ -51,12 +57,6 @@ func (r *HandlerRepository) get(name string) (*HandlerPool, error) {
 		return nil, fmt.Errorf("no handler pool found for %s", name)
 	}
 	return pool, nil
-}
-
-func (r *HandlerRepository) RegisterHandlerPools(p []*HandlerPool) {
-	for _, handlerPool := range p {
-		r.registerHandlerPool(handlerPool)
-	}
 }
 
 func (r *HandlerRepository) registerHandlerPool(p *HandlerPool) {

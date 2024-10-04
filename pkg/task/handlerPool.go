@@ -6,14 +6,6 @@ import (
 	"sync"
 )
 
-type HandlerPoolStatistics struct {
-	ActiveWorkers  int
-	IdleWorkers    int
-	Workers        int
-	MaxWorkers     int
-	TasksProcessed int
-}
-
 func NewHandlerPool(ctx context.Context, h Handler, maxWorkers int) *HandlerPool {
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	p := &HandlerPool{
@@ -25,7 +17,7 @@ func NewHandlerPool(ctx context.Context, h Handler, maxWorkers int) *HandlerPool
 		chWorkerInput: make(chan HandlerTask),
 	}
 
-	p.ChHandlerTask = make(chan HandlerTask, p.maxWorkers)
+	p.ChTasks = make(chan HandlerTask, p.maxWorkers)
 
 	go p.listen()
 	return p
@@ -42,7 +34,7 @@ type HandlerPool struct {
 	tasksProcessed int
 	handler        Handler
 
-	ChHandlerTask chan HandlerTask
+	ChTasks       chan HandlerTask
 	chWorkerInput chan HandlerTask
 
 	mux sync.RWMutex
@@ -64,6 +56,12 @@ func (p *HandlerPool) Statistics() HandlerPoolStatistics {
 	}
 }
 
+func (p *HandlerPool) decreaseWorkerCount() {
+	p.mux.Lock()
+	defer p.mux.Unlock()
+	p.workers--
+}
+
 func (p *HandlerPool) listen() {
 	p.mux.Lock()
 	for i := 0; i < p.maxWorkers; i++ {
@@ -81,7 +79,7 @@ func (p *HandlerPool) listen() {
 		select {
 		case <-p.ctx.Done():
 			exit = true
-		case ht, ok := <-p.ChHandlerTask:
+		case ht, ok := <-p.ChTasks:
 			if !ok {
 				exit = true
 			}
@@ -116,7 +114,8 @@ func (p *HandlerPool) runWorker(ctx context.Context) {
 
 			status, err := p.handler.Execute(ctx, t.Task, t.Pipeline)
 			if t.ChResult != nil {
-				t.ChResult <- HandlerTaskResult{
+				t.ChResult <- HandlerResult{
+					Task:   t.Task,
 					Status: status,
 					Error:  err,
 				}
@@ -128,12 +127,6 @@ func (p *HandlerPool) runWorker(ctx context.Context) {
 			p.mux.Unlock()
 		}
 	}
-}
-
-func (p *HandlerPool) decreaseWorkerCount() {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	p.workers--
 }
 
 func setMaxWorkers(maxWorkers int) int {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jantytgat/go-jobs/pkg/library"
 	"github.com/jantytgat/go-jobs/pkg/task"
+	"github.com/jantytgat/go-jobs/pkg/taskLibrary"
 )
 
 func main() {
@@ -14,8 +14,8 @@ func main() {
 	// defer cancel()
 
 	// hp := library.PrintTaskHandlerPool(ctx, time.Duration(5)*time.Second)
-	hp := task.NewHandlerPool(ctx, library.PrintTaskHandler(time.Duration(1)*time.Second), 0)
-	chResult := make(chan task.HandlerTaskResult, 2000)
+	hp := task.NewHandlerPool(ctx, taskLibrary.PrintTaskHandler(time.Duration(1)*time.Second), 0)
+	chResult := make(chan task.HandlerResult, 2000)
 
 	go func(ctx context.Context) {
 		for {
@@ -43,8 +43,8 @@ func main() {
 			exit = true
 		default:
 			i++
-			hp.ChHandlerTask <- task.HandlerTask{
-				Task:     library.PrintTask{Message: fmt.Sprintf("Task %04d", i)},
+			hp.ChTasks <- task.HandlerTask{
+				Task:     taskLibrary.PrintTask{Message: fmt.Sprintf("Task %04d", i)},
 				Pipeline: nil,
 				ChResult: chResult,
 			}

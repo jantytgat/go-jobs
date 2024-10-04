@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jantytgat/go-jobs/pkg/library"
 	"github.com/jantytgat/go-jobs/pkg/task"
+	"github.com/jantytgat/go-jobs/pkg/taskLibrary"
 )
 
 func main() {
 	r := task.NewHandlerRepository()
 	ctx, cancel := context.WithCancel(context.Background())
-	chResult := make(chan task.HandlerTaskResult, 2000)
+	chResult := make(chan task.HandlerResult, 2000)
 
 	go func(ctx context.Context) {
 		for {
@@ -42,7 +42,7 @@ func main() {
 			default:
 				i++
 				if err := r.Execute(ctx, task.HandlerTask{
-					Task:     library.EmptyTask{Message: fmt.Sprintf("Task %04d", i)},
+					Task:     taskLibrary.PrintTask{Message: fmt.Sprintf("Task %04d", i)},
 					Pipeline: nil,
 					ChResult: chResult,
 				}); err != nil {
@@ -66,7 +66,7 @@ func main() {
 		default:
 			i++
 			if err := r.Execute(ctx, task.HandlerTask{
-				Task:     library.PrintTask{Message: fmt.Sprintf("Task %04d", i)},
+				Task:     taskLibrary.PrintTask{Message: fmt.Sprintf("Task %04d", i)},
 				Pipeline: nil,
 				ChResult: chResult,
 			}); err != nil {

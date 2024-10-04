@@ -5,13 +5,7 @@ import "testing"
 func TestStatus_String(t *testing.T) {
 	var (
 		result []string
-		wanted = []string{
-			"none",
-			"pending",
-			"success",
-			"canceled",
-			"error",
-		}
+		wanted = StatusStrings
 	)
 
 	for i := 0; i < len(wanted); i++ {

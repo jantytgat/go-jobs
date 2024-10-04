@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jantytgat/go-jobs/pkg/library"
+	"github.com/jantytgat/go-jobs/pkg/taskLibrary"
 )
 
 func main() {
-	t := library.PrintTask{Message: "Hello!"}
+	t := taskLibrary.PrintTask{Message: "Hello!"}
 	status, err := t.DefaultHandler().Execute(context.Background(), t, nil)
 	fmt.Printf("Status: %s, Error: %v\r\n", status, err)
 }
