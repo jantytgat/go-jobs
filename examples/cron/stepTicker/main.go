@@ -22,9 +22,8 @@ func main() {
 	tickers := make([]*cron.Ticker, maxTickers)
 
 	for i := 0; i < maxTickers; i++ {
-		tickers[i] = cron.NewTicker(ctx, schedule, chOut)
+		tickers[i] = cron.NewTicker(schedule, chOut)
 	}
-	// ticker := cron.NewTicker(ctx, schedule, chOut)
 
 	go func() {
 		for {
@@ -39,9 +38,9 @@ func main() {
 
 	// start ticker
 	for i := 0; i < maxTickers; i++ {
-		tickers[i].Start()
+		_ = tickers[i].Start(ctx)
 	}
-	// ticker.start()
+
 	time.Sleep(20*time.Second + 1)
 	cancel()
 }
