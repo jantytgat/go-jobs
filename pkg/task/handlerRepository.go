@@ -20,21 +20,31 @@ type HandlerRepository struct {
 
 func (r *HandlerRepository) Execute(ctx context.Context, t HandlerTask) error {
 	handlerPool, err := r.get(t.Task.Name())
+
 	if err != nil {
-		r.registerHandlerPool(t.Task.DefaultHandlerPool(ctx))
+		// Try to register the default handler pool for task, return on error
+		if err = r.registerHandlerPool(t.Task.DefaultHandlerPool(ctx)); err != nil {
+			return err
+		}
+
+		// Second attempt to get the handler pool for the task, return on error
 		if handlerPool, err = r.get(t.Task.Name()); err != nil {
 			return err
 		}
 	}
 
+	// Send the task to the handler pool channel
 	handlerPool.ChTasks <- t
 	return nil
 }
 
-func (r *HandlerRepository) RegisterHandlerPools(p []*HandlerPool) {
+func (r *HandlerRepository) RegisterHandlerPools(p []*HandlerPool) error {
 	for _, handlerPool := range p {
-		r.registerHandlerPool(handlerPool)
+		if err := r.registerHandlerPool(handlerPool); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (r *HandlerRepository) Statistics() map[string]HandlerPoolStatistics {
@@ -59,12 +69,18 @@ func (r *HandlerRepository) get(name string) (*HandlerPool, error) {
 	return pool, nil
 }
 
-func (r *HandlerRepository) registerHandlerPool(p *HandlerPool) {
+func (r *HandlerRepository) registerHandlerPool(p *HandlerPool) error {
 	r.mux.Lock()
 	defer r.mux.Unlock()
+
+	if p == nil {
+		return fmt.Errorf("handler pool is nil")
+	}
 
 	_, found := r.handlerPools[p.Name()]
 	if !found {
 		r.handlerPools[p.Name()] = p
 	}
+
+	return nil
 }
