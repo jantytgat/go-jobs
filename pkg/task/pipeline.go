@@ -1,9 +1,31 @@
 package task
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 )
+
+var pipelineDataFields = make([]string, 0)
+
+func RegisterPipelineDataField(s string) error {
+	for _, v := range pipelineDataFields {
+		if v == s {
+			return fmt.Errorf("pipeline data field %s already registered", s)
+		}
+	}
+	pipelineDataFields = append(pipelineDataFields, s)
+	return nil
+}
+
+func RegisterPipelineDataFields(s []string) error {
+	for _, v := range s {
+		if err := RegisterPipelineDataField(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func NewPipeline(l *slog.Logger) *Pipeline {
 	return &Pipeline{
@@ -37,10 +59,16 @@ func (p *Pipeline) Errors() []error {
 	return p.errors
 }
 
-func (p *Pipeline) Get(key string) interface{} {
+func (p *Pipeline) Get(key string) (interface{}, error) {
 	p.mux.RLock()
 	defer p.mux.RUnlock()
-	return p.data[key]
+
+	var v interface{}
+	var found bool
+	if v, found = p.data[key]; !found {
+		return nil, fmt.Errorf("pipeline key %s not found", key)
+	}
+	return v, nil
 }
 
 func (p *Pipeline) Keys() []string {
