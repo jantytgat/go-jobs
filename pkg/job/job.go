@@ -6,19 +6,27 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jantytgat/go-jobs/pkg/cron"
+	"github.com/jantytgat/go-jobs/pkg/task"
 )
 
-func NewJob(uuid uuid.UUID, name string, schedule cron.Schedule) Job {
-	return Job{
+func New(uuid uuid.UUID, name string, schedule cron.Schedule, tasks []task.Task, opts ...Option) Job {
+	j := Job{
 		Uuid:             uuid,
 		Name:             name,
 		Schedule:         schedule,
-		Enabled:          false,
+		Enabled:          true,
 		LimitConcurrency: true,
 		MaxConcurrency:   1,
 		LimitRuns:        false,
 		MaxRuns:          0,
+		Tasks:            tasks,
 	}
+
+	for _, opt := range opts {
+		opt(&j)
+	}
+
+	return j
 }
 
 type Job struct {
@@ -30,52 +38,23 @@ type Job struct {
 	MaxConcurrency   int
 	LimitRuns        bool
 	MaxRuns          int
+	Tasks            []task.Task
 }
 
-func (j Job) Disable() Job {
+func (j *Job) Disable() {
 	j.Enabled = false
-	return j
 }
 
-func (j Job) Enable() Job {
+func (j *Job) Enable() {
 	j.Enabled = true
-	return j
 }
 
-func (j Job) LogValue() slog.Value {
+func (j *Job) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("Uuid", j.Uuid.String()),
 		slog.String("Name", j.Name))
 }
 
-func (j Job) LogAttrs() []slog.Attr {
+func (j *Job) LogAttrs() []slog.Attr {
 	return []slog.Attr{slog.Any("job", j)}
-}
-
-func (j Job) WithMaxConcurrency(i int) Job {
-	j.LimitConcurrency = true
-	j.MaxConcurrency = i
-	return j
-}
-
-func (j Job) WithMaxRuns(i int) Job {
-	j.LimitRuns = true
-	j.MaxRuns = i
-	return j
-}
-
-func (j Job) WithNoConcurrency() Job {
-	j.LimitConcurrency = true
-	j.MaxConcurrency = 1
-	return j
-}
-
-func (j Job) WithUnlimitedConcurrency() Job {
-	j.LimitConcurrency = false
-	return j
-}
-
-func (j Job) WithUnlimitedRuns() Job {
-	j.LimitRuns = false
-	return j
 }
