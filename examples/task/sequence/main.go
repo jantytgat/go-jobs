@@ -24,6 +24,7 @@ func main() {
 		tasks = append(tasks, []task.Task{
 			taskLibrary.EmptyTask{},
 			taskLibrary.LogTask{Message: fmt.Sprintf("Task %d", i), Level: slog.LevelDebug},
+			taskLibrary.EmptyTask{},
 		}...)
 	}
 
@@ -32,16 +33,11 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runSequence(ctx, logger, r, tasks)
+			if _, err := task.ExecuteSequence(ctx, logger, tasks, r); err != nil {
+				panic(err)
+			}
 		}()
 	}
 	wg.Wait()
 	fmt.Println(r.Statistics())
-}
-
-func runSequence(ctx context.Context, logger *slog.Logger, r *task.HandlerRepository, tasks []task.Task) {
-	s := task.NewSequence(logger, tasks)
-	if err := s.Execute(ctx, r); err != nil {
-		panic(err)
-	}
 }

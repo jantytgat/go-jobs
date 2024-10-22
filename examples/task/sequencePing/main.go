@@ -25,7 +25,7 @@ func main() {
 			taskLibrary.ExecTask{
 				Program: "ping",
 				Path:    "/sbin",
-				Args:    []string{"-c", "3", "8.8.8.8"},
+				Args:    []string{"-c", "10", "127.0.0.1"},
 			},
 			taskLibrary.LogTask{Message: fmt.Sprintf("Task %d", i), Level: slog.LevelDebug},
 		}...)
@@ -36,16 +36,11 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runSequence(ctx, logger, r, tasks)
+			if _, err := task.ExecuteSequence(ctx, logger, tasks, r); err != nil {
+				panic(err)
+			}
 		}()
 	}
 	wg.Wait()
 	fmt.Println(r.Statistics())
-}
-
-func runSequence(ctx context.Context, logger *slog.Logger, r *task.HandlerRepository, tasks []task.Task) {
-	s := task.NewSequence(logger, tasks)
-	if err := s.Execute(ctx, r); err != nil {
-		panic(err)
-	}
 }
