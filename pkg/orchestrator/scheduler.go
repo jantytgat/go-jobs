@@ -2,90 +2,113 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/jantytgat/go-jobs/pkg/cron"
 )
 
-func newScheduler(ctx context.Context, chJob chan schedulerUpdate) (*scheduler, chan tick) {
-	schedulerCtx, schedulerCancel := context.WithCancel(ctx)
-	chTick := make(chan tick)
+func newScheduler(chIn chan schedulerMessage, chOut chan schedulerTick) *scheduler {
 	s := &scheduler{
-		ctx:      schedulerCtx,
-		cancel:   schedulerCancel,
-		chUpdate: chJob,
-		chTick:   chTick,
+		chIn:    chIn,
+		chOut:   chOut,
+		tickers: make(map[uuid.UUID]*schedulerTicker),
 	}
-	s.tickerCtx, s.tickerCancel = context.WithCancel(schedulerCtx)
-	go s.start(schedulerCtx)
-	return s, chTick
+	return s
 }
 
 type scheduler struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	chUpdate chan schedulerUpdate
-	chTick   chan tick
-
-	tickerCtx    context.Context
-	tickerCancel context.CancelFunc
-
-	tickers map[uuid.UUID]*cron.Ticker
-
-	mux sync.RWMutex
+	chIn             chan schedulerMessage
+	chOut            chan schedulerTick
+	listenCtx        context.Context
+	listenCancelFunc context.CancelFunc
+	tickers          map[uuid.UUID]*schedulerTicker
+	mux              sync.Mutex
 }
 
-func (s *scheduler) listen(ctx context.Context, uuid uuid.UUID, chTick chan time.Time) {
+func (s *scheduler) IsRunning() bool {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	if s.listenCancelFunc != nil {
+		return true
+	}
+	return false
+}
+
+func (s *scheduler) Start(ctx context.Context) {
+	go s.listen(ctx)
 	for {
-		select {
-		case <-ctx.Done():
+		if s.IsRunning() {
 			return
-		case t := <-chTick:
-			s.chTick <- tick{
-				uuid: uuid,
-				time: t,
-			}
 		}
 	}
 }
 
-func (s *scheduler) start(ctx context.Context) {
+func (s *scheduler) Stop() error {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	if s.listenCancelFunc == nil {
+		return fmt.Errorf("scheduler has already been stopped")
+	}
+	s.listenCancelFunc()
+	s.listenCancelFunc = nil
+	return nil
+}
+
+func (s *scheduler) handleUpdate(u schedulerMessage) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	if !s.tickerExists(u.uuid) {
+		s.tickers[u.uuid] = newSchedulerTicker(u.uuid, u.schedule)
+	}
+
+	switch u.enabled {
+	case true:
+		if !s.tickers[u.uuid].isRunning() {
+			go s.tickers[u.uuid].Start(s.listenCtx, s.chOut)
+		}
+	case false:
+		// Stop the individual ticker, then remove it from the map
+		if s.tickers[u.uuid].isRunning() {
+			s.tickers[u.uuid].Stop()
+		}
+		delete(s.tickers, u.uuid)
+	}
+}
+
+func (s *scheduler) isRunning() bool {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	if s.listenCancelFunc == nil {
+		return false
+	}
+	return true
+}
+
+// Start the scheduler to listen for updates from schedulerTickers
+// If the scheduleTicker cannot be found, add a new one to the map.
+// For each ticker, the scheduler channel chOut is passed so the tickers can send a trigger to the orchestrator when
+// an item must be queued.
+func (s *scheduler) listen(ctx context.Context) {
+	s.mux.Lock()
+	s.listenCtx, s.listenCancelFunc = context.WithCancel(ctx)
+	s.mux.Unlock()
+
 	for {
 		select {
-		case <-ctx.Done(): // stop all tickers
-			s.tickerCancel()
+		case <-s.listenCtx.Done():
+			// All tickers will be stopped as well as their context is based on s.listenCtx
 			return
-		case u := <-s.chUpdate:
-			var t *cron.Ticker
-			var found bool
-
-			// look up the ticker for the job uuid
-			s.mux.RLock()
-			t, found = s.tickers[u.uuid]
-			s.mux.RUnlock()
-
-			if !found {
-				chTick := make(chan time.Time)
-				go s.listen(ctx, u.uuid, chTick) // start goroutine to listen for ticker events
-
-				s.mux.Lock()
-				// add ticker to scheduler when it does not exist
-				t = cron.NewTicker(s.tickerCtx, u.schedule, chTick)
-				s.tickers[u.uuid] = t
-				s.mux.Unlock()
-			}
-
-			// Update the ticker state
-			switch u.enabled {
-			case true:
-				t.Start()
-			case false:
-				t.Stop()
-			}
+		case u := <-s.chIn:
+			go s.handleUpdate(u)
 		}
 	}
+}
+
+func (s *scheduler) tickerExists(uuid uuid.UUID) bool {
+	var found bool
+	_, found = s.tickers[uuid]
+	return found
 }

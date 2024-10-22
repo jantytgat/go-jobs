@@ -6,7 +6,7 @@ import (
 	"github.com/jantytgat/go-jobs/pkg/cron"
 )
 
-type schedulerUpdate struct {
+type schedulerMessage struct {
 	uuid     uuid.UUID
 	enabled  bool
 	schedule cron.Schedule
