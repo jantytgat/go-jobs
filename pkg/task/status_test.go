@@ -1,15 +1,15 @@
-package cron
+package task
 
 import "testing"
 
-func TestExpressionType_String(t *testing.T) {
+func TestStatus_String(t *testing.T) {
 	var (
 		result []string
-		wanted = qualificationStrings
+		wanted = StatusStrings
 	)
 
 	for i := 0; i < len(wanted); i++ {
-		result = append(result, qualification(i).String())
+		result = append(result, Status(i).String())
 	}
 
 	for j := 0; j < len(wanted); j++ {

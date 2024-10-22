@@ -1,11 +1,5 @@
 package cron
 
-type position int
-
-func (p position) String() string {
-	return [...]string{"second", "minute", "hour", "day", "month", "weekday", "year"}[p]
-}
-
 const (
 	positionSecond position = iota
 	positionMinute
@@ -15,3 +9,11 @@ const (
 	positionWeekday
 	positionYear
 )
+
+var positionStrings = []string{"second", "minute", "hour", "day", "month", "weekday", "year"}
+
+type position int
+
+func (p position) String() string {
+	return positionStrings[p]
+}

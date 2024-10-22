@@ -24,6 +24,8 @@ var reDayOfWeek = regexp.MustCompile(validDayOfWeek)
 var reDayOfMonth = regexp.MustCompile(validDayOfMonth)
 var reYear = regexp.MustCompile(validYear)
 
+// newElement returns a new cron element based on the input expression and position.
+// Returns an error if the expression cannot be validated for the position.
 func newElement(expression string, position position) (element, error) {
 	e := element{
 		expression: expression,
@@ -31,39 +33,42 @@ func newElement(expression string, position position) (element, error) {
 		q:          qualificationNone,
 	}
 
-	return e, e.validate()
+	return e, e.validate() // element has pointer receivers, validate() will update the qualification on return
 }
 
+// Element specifies the expression for a specific position in the cron schedule definition.
 type element struct {
 	expression string
 	p          position
 	q          qualification
 }
 
-func (e *element) isDue(inputs []int, t int) bool {
+// isDue checks if the value of t matches with any of the inputs, based on the qualification of the element.
+func (e *element) isDue(t int, inputs []int) bool {
+	// Fail-fast check to make sure there is input to check against.
 	if len(inputs) == 0 {
 		return false
 	}
 
 	switch e.q {
-	case qualificationSimple:
+	case qualificationSimple: // only a single value is possible for the input
 		if inputs[0] == t {
 			return true
 		}
 		return false
-	case qualificationMulti:
+	case qualificationMulti: // multiple values are possible, we can match on any input value
 		for _, i := range inputs {
 			if i == t {
 				return true
 			}
 		}
 		return false
-	case qualificationRange:
+	case qualificationRange: // input must be in a range between two input values
 		if t >= inputs[0] && t <= inputs[1] {
 			return true
 		}
 		return false
-	case qualificationStep:
+	case qualificationStep: // value must return 0 when performing a mod division by the input
 		if t%inputs[0] == 0 {
 			return true
 		}
@@ -73,6 +78,8 @@ func (e *element) isDue(inputs []int, t int) bool {
 	}
 }
 
+// parseExpression parses the expression into an array of int which can be used to check if the element is due.
+// An error will be returned if the value of the expression cannot be parsed into an array of int.
 func (e *element) parseExpression() ([]int, error) {
 	var (
 		s      []string
@@ -87,14 +94,17 @@ func (e *element) parseExpression() ([]int, error) {
 
 	// Parsing depends on the qualification of the element
 	switch e.q {
-	case qualificationNone:
-		return nil, fmt.Errorf("%s", "element has not been validated")
-	case qualificationSimple:
+	case qualificationNone: // validate the expression in case the element hasn't got a proper qualification
+		if err = e.validate(); err != nil {
+			return nil, err
+		}
+		return e.parseExpression()
+	case qualificationSimple: // parsing should return a single value
 		output = make([]int, 1)
 		if output[0], err = strconv.Atoi(e.expression); err != nil {
 			return output, err
 		}
-	case qualificationMulti:
+	case qualificationMulti: // expression has multiple values separated by a comma
 		s = strings.Split(e.expression, ",")
 		output = make([]int, len(s))
 		for k, v := range s {
@@ -102,7 +112,7 @@ func (e *element) parseExpression() ([]int, error) {
 				return output, err
 			}
 		}
-	case qualificationRange:
+	case qualificationRange: // expression defines a ranges of values between two numbers
 		s = strings.Split(e.expression, "-")
 		output = make([]int, 2)
 		for k, v := range s {
@@ -111,10 +121,16 @@ func (e *element) parseExpression() ([]int, error) {
 			}
 		}
 	case qualificationStep:
-		s = strings.Split(e.expression, "*/")
 		output = make([]int, 1)
+		s = strings.Split(e.expression, "*/")
+		if e.expression == s[0] {
+			return output, fmt.Errorf("expression %s does not start with */", e.expression)
+		}
+
 		// Error handling is not required, as qualification is already parsed and step is an int
-		output[0], _ = strconv.Atoi(s[0])
+		if output[0], err = strconv.Atoi(s[1]); err != nil {
+			return output, err
+		}
 	}
 
 	// If there are multiple values, check if they are ascending
@@ -128,6 +144,7 @@ func (e *element) parseExpression() ([]int, error) {
 	return output, nil
 }
 
+// qualify takes the expression for the element and detects the qualification (simple, multi, range, step)
 func (e *element) qualify() {
 	if !strings.ContainsAny(e.expression, strings.Join(qualificationChars, "")) {
 		e.q = qualificationSimple
@@ -136,13 +153,14 @@ func (e *element) qualify() {
 
 	for i, char := range qualificationChars {
 		if strings.Contains(e.expression, char) {
-			// qualification starts at 2 = qualificationMulti
+			// offset qualification for complex expressions, starts at i=2: qualificationMulti
 			e.q = qualification(i + 2)
 			return
 		}
 	}
 }
 
+// trigger checks if input t aligns with the expression for the element, depending on the position and qualification of the element.
 func (e *element) trigger(t time.Time) bool {
 	if e.expression == "*" {
 		return true
@@ -170,9 +188,12 @@ func (e *element) trigger(t time.Time) bool {
 	case positionYear:
 		input = t.Year()
 	}
-	return e.isDue(intervals, input)
+
+	return e.isDue(input, intervals)
 }
 
+// validate ensures that the element has a valid expression set for its position.
+// Returns an error if the expression cannot be validated for its position.
 func (e *element) validate() error {
 	var err error
 
@@ -203,8 +224,9 @@ func (e *element) validate() error {
 	return nil
 }
 
+// validateExpressionForPosition validates the expression of the element against the predefined regular expression for that position.
+// Returns an error if no match was found for the regular expression.
 func (e *element) validateExpressionForPosition() error {
-	// Validate element by position
 	var s []string
 	switch e.p {
 	case positionSecond:
