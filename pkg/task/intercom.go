@@ -2,10 +2,6 @@ package task
 
 import "sync"
 
-type IntercomStatistics struct {
-	ErrorCount int
-}
-
 type Intercom struct {
 	mux    sync.Mutex
 	errors []error
