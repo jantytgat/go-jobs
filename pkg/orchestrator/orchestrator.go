@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -10,30 +11,31 @@ import (
 	"github.com/jantytgat/go-jobs/pkg/task"
 )
 
-func New(maxRunners int, opts ...Option) *Orchestrator {
+func New(logger *slog.Logger, maxRunners int, opts ...Option) (*Orchestrator, error) {
+	if logger == nil {
+		return nil, errors.New("logger required")
+	}
+	logger = logger.WithGroup("orchestrator")
+
 	chScheduler := make(chan schedulerMessage, maxRunners)
 	chTick := make(chan schedulerTick, maxRunners)
 	chResults := make(chan job.Result, maxRunners)
-	s := newScheduler(chScheduler, chTick)
-
 	chDispatcher := make(chan dispatcherMessage, maxRunners)
 
 	o := &Orchestrator{
-		scheduler:    s,
-		dispatcher:   newDispatcher(maxRunners, chDispatcher, chResults),
+		scheduler:    newScheduler(logger, chScheduler, chTick),
+		dispatcher:   newDispatcher(logger, maxRunners, chDispatcher, chResults),
 		chScheduler:  chScheduler,
 		chDispatcher: chDispatcher,
 		chTick:       chTick,
 		chResults:    chResults,
+		logger:       logger,
+		maxRunners:   maxRunners,
 		mux:          sync.Mutex{},
 	}
 
 	for _, opt := range opts {
 		opt(o)
-	}
-
-	if o.logger == nil {
-		o.logger = slog.Default()
 	}
 
 	if o.Catalog == nil {
@@ -48,7 +50,7 @@ func New(maxRunners int, opts ...Option) *Orchestrator {
 		o.queue = NewMemoryQueue()
 	}
 
-	return o
+	return o, nil
 }
 
 type Orchestrator struct {
@@ -64,27 +66,32 @@ type Orchestrator struct {
 	chDispatcher chan dispatcherMessage  // channel to send jobs to dispatcher
 	chResults    chan job.Result         // channel to get results from dispatcher
 	chTick       chan schedulerTick      // channel to receive ticks from scheduler
-
-	mux sync.Mutex
+	maxRunners   int
+	mux          sync.Mutex
 }
 
-func (o *Orchestrator) Start(ctx context.Context) {
+func (o *Orchestrator) Start(ctx context.Context) error {
 	o.mux.Lock()
 	defer o.mux.Unlock()
 
 	var oCtx context.Context
 	oCtx, o.cancelFunc = context.WithCancel(ctx)
 
-	o.scheduler.Start(oCtx)
-	o.dispatcher.Start(oCtx, o.logger)
-
-	if o.scheduler.IsRunning() {
-		go o.storeResults(oCtx)
-		go o.sendToDispatcher(oCtx)
-		go o.sendToScheduler(oCtx)
-		go o.listenToTickers(oCtx)
+	var err error
+	if err = o.dispatcher.Start(oCtx); err != nil {
+		return err
+	}
+	if err = o.scheduler.Start(oCtx); err != nil {
+		return err
 	}
 
+	if o.scheduler.IsRunning() {
+		go o.resultHandler(oCtx)
+		go o.listenToQueue(oCtx)
+		go o.schedulerMessenger(oCtx)
+		go o.listenToTickers(oCtx)
+	}
+	return nil
 }
 
 func (o *Orchestrator) Statistics() Statistics {
@@ -101,45 +108,16 @@ func (o *Orchestrator) Statistics() Statistics {
 }
 
 func (o *Orchestrator) Stop() {
-	o.cancelFunc()
-}
-
-func (o *Orchestrator) sendToScheduler(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			jobs := o.Catalog.All()
-			if len(jobs) == 0 {
-				time.Sleep(1 * time.Second)
-				break
-			}
-
-			for _, j := range jobs {
-				o.chScheduler <- schedulerMessage{
-					uuid:     j.Uuid,
-					enabled:  j.Enabled,
-					schedule: j.Schedule,
-				}
-			}
-			time.Sleep(10 * time.Second) // TODO increase sleep time?
-		}
+	o.mux.Lock()
+	defer o.mux.Unlock()
+	if o.cancelFunc != nil {
+		o.cancelFunc()
 	}
 }
 
-func (o *Orchestrator) listenToTickers(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case t := <-o.chTick:
-			o.queue.Push(t)
-		}
-	}
-}
-
-func (o *Orchestrator) sendToDispatcher(ctx context.Context) {
+func (o *Orchestrator) listenToQueue(ctx context.Context) {
+	o.logger.LogAttrs(ctx, slog.LevelDebug, "starting queue listener")
+	defer o.logger.LogAttrs(ctx, slog.LevelDebug, "stopping queue listener")
 	for {
 		select {
 		case <-ctx.Done():
@@ -148,25 +126,101 @@ func (o *Orchestrator) sendToDispatcher(ctx context.Context) {
 			var t schedulerTick
 			var err error
 			if t, err = o.queue.Pop(); err != nil {
+				// TODO add custom error type to handle different events?
+				// o.logger.LogAttrs(o.ctx, slog.LevelDebug, "no jobs in queue")
+				// time.Sleep(100 * time.Millisecond)
 				break
 			}
 
-			var j job.Job
-			if j, err = o.Catalog.Get(t.uuid); err != nil {
-				// TODO handle errors to job catalog when job cannot be found
-				time.Sleep(5 * time.Second) // back off from catalog before getting next item off the queue
-				break
-			}
-			o.chDispatcher <- dispatcherMessage{
-				job:               j,
-				handlerRepository: o.Handlers,
-				trigger:           t.time,
-			}
+			go o.dispatchJob(ctx, t)
 		}
 	}
 }
 
-func (o *Orchestrator) storeResults(ctx context.Context) {
+func (o *Orchestrator) listenToTickers(ctx context.Context) {
+	o.logger.LogAttrs(ctx, slog.LevelDebug, "starting ticker listener")
+	defer o.logger.LogAttrs(ctx, slog.LevelDebug, "stopping ticker listener")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-o.chTick:
+			go o.queue.Push(t)
+		}
+	}
+}
+
+func (o *Orchestrator) dispatchJob(ctx context.Context, tick schedulerTick) {
+	o.logger.LogAttrs(ctx, slog.LevelDebug, "dispatching job", slog.Group("job", slog.String("id", tick.uuid.String()), slog.String("time", tick.time.String())))
+	var exit bool
+	var err error
+	var retries int
+	maxRetries := 5
+
+	for {
+		if exit {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if retries < maxRetries {
+				var j job.Job
+				j, err = o.Catalog.Get(tick.uuid)
+				if err != nil {
+					retries++
+					o.logger.LogAttrs(o.ctx, slog.LevelError, "failed to get job for dispatcher", slog.String("job", tick.uuid.String()), slog.String("error", err.Error()))
+					time.Sleep(1 * time.Second) // back off from catalog before retrying
+					break
+				}
+
+				o.chDispatcher <- dispatcherMessage{
+					job:               j,
+					handlerRepository: o.Handlers,
+					trigger:           tick.time,
+				}
+			}
+			exit = true
+		}
+	}
+}
+
+func (o *Orchestrator) schedulerMessenger(ctx context.Context) {
+	o.logger.LogAttrs(ctx, slog.LevelDebug, "starting scheduler messenger")
+	defer o.logger.LogAttrs(ctx, slog.LevelDebug, "stopping scheduler messenger")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if o.Catalog.Count() == 0 {
+				o.logger.LogAttrs(o.ctx, slog.LevelDebug, "no jobs to send to scheduler")
+				// time.Sleep(1 * time.Second) // set to the smallest interval the cron package can handle
+				break
+			}
+
+			jobs := o.Catalog.All()
+			for _, j := range jobs {
+				go func() {
+					o.logger.LogAttrs(ctx, slog.LevelDebug, "sending message to scheduler", slog.Group("job", slog.String("id", j.Uuid.String())))
+					o.chScheduler <- schedulerMessage{
+						uuid:     j.Uuid,
+						enabled:  j.Enabled,
+						schedule: j.Schedule,
+					}
+				}()
+			}
+			time.Sleep(10 * time.Second) // TODO increase sleep time?
+		}
+	}
+}
+
+func (o *Orchestrator) resultHandler(ctx context.Context) {
+	o.logger.LogAttrs(ctx, slog.LevelDebug, "starting result handler")
+	defer o.logger.LogAttrs(ctx, slog.LevelDebug, "stopping result handler")
 	for {
 		select {
 		case <-ctx.Done():

@@ -3,18 +3,21 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/jantytgat/go-jobs/pkg/cron"
 )
 
-func newScheduler(chIn chan schedulerMessage, chOut chan schedulerTick) *scheduler {
+func newScheduler(logger *slog.Logger, chIn chan schedulerMessage, chOut chan schedulerTick) *scheduler {
 	s := &scheduler{
 		chIn:    chIn,
 		chOut:   chOut,
 		tickers: make(map[uuid.UUID]*schedulerTicker),
+		logger:  logger.WithGroup("scheduler"),
 	}
 	return s
 }
@@ -25,6 +28,7 @@ type scheduler struct {
 	listenCtx        context.Context
 	listenCancelFunc context.CancelFunc
 	tickers          map[uuid.UUID]*schedulerTicker
+	logger           *slog.Logger
 	mux              sync.Mutex
 }
 
@@ -38,11 +42,20 @@ func (s *scheduler) IsRunning() bool {
 	return false
 }
 
-func (s *scheduler) Start(ctx context.Context) {
+func (s *scheduler) Start(ctx context.Context) error {
 	go s.listen(ctx)
+	startCtx, startCancel := context.WithTimeout(ctx, 1*time.Second)
+	defer startCancel()
 	for {
-		if s.IsRunning() {
-			return
+		select {
+		case <-startCtx.Done():
+			s.logger.LogAttrs(ctx, slog.LevelError, "scheduler start timeout")
+			return fmt.Errorf("scheduler start timeout")
+		default:
+			if s.IsRunning() { // TODO add timeout to start before returning an error?
+				s.logger.LogAttrs(ctx, slog.LevelDebug, "scheduler has started")
+				return nil
+			}
 		}
 	}
 }
@@ -52,6 +65,7 @@ func (s *scheduler) Stop() error {
 	defer s.mux.Unlock()
 
 	if s.listenCancelFunc == nil {
+		s.logger.LogAttrs(context.Background(), slog.LevelWarn, "scheduler has already been stopped")
 		return fmt.Errorf("scheduler has already been stopped")
 	}
 	s.listenCancelFunc()
@@ -59,38 +73,31 @@ func (s *scheduler) Stop() error {
 	return nil
 }
 
-func (s *scheduler) addTicker(uuid uuid.UUID, schedule cron.Schedule) {
+func (s *scheduler) getTicker(uuid uuid.UUID) *schedulerTicker {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	s.tickers[uuid] = newSchedulerTicker(uuid, schedule)
-}
-
-func (s *scheduler) deleteTicker(uuid uuid.UUID) {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	delete(s.tickers, uuid)
+	return s.tickers[uuid]
 }
 
 func (s *scheduler) handleUpdate(u schedulerMessage) {
-	// Only add new ticker if the uuid does not exist and the ticker must be enabled.
-	// If the ticker does not exist and it should be disabled, exit the function as no further action is required.
-	if !s.tickerExists(u.uuid) && u.enabled {
-		s.addTicker(u.uuid, u.schedule)
-	} else if !u.enabled {
+	tickerExists := s.tickerExists(u.uuid)
+
+	// If the ticker does not exist and must be enabled, start a new ticker
+	if !tickerExists && u.enabled {
+		s.startTicker(u.uuid, u.schedule)
 		return
 	}
 
-	switch u.enabled {
-	case true:
-		if !s.tickers[u.uuid].isRunning() {
-			go s.tickers[u.uuid].Start(s.listenCtx, s.chOut)
-		}
-	case false:
-		// Stop the individual ticker, then remove it from the map
-		if s.tickers[u.uuid].isRunning() {
-			s.tickers[u.uuid].Stop()
-		}
-		s.deleteTicker(u.uuid)
+	// The ticker exists and must be disabled
+	if !u.enabled {
+		s.stopTicker(u.uuid)
+		return
+	}
+
+	// The ticker exists but the schedule has changed
+	if s.getTicker(u.uuid).schedule.String() != u.schedule.String() {
+		s.updateTicker(u.uuid, u.schedule)
+		return
 	}
 }
 
@@ -108,6 +115,8 @@ func (s *scheduler) isRunning() bool {
 // For each ticker, the scheduler channel chOut is passed so the tickers can send a trigger to the orchestrator when
 // an item must be queued.
 func (s *scheduler) listen(ctx context.Context) {
+	s.logger.LogAttrs(ctx, slog.LevelDebug, "scheduler starting")
+	defer s.logger.LogAttrs(ctx, slog.LevelDebug, "scheduler stopped")
 	s.mux.Lock()
 	s.listenCtx, s.listenCancelFunc = context.WithCancel(ctx)
 	s.mux.Unlock()
@@ -123,8 +132,38 @@ func (s *scheduler) listen(ctx context.Context) {
 	}
 }
 
+func (s *scheduler) startTicker(uuid uuid.UUID, schedule cron.Schedule) {
+	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "starting ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", schedule.String())))
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	s.tickers[uuid] = newSchedulerTicker(uuid, schedule)
+	s.tickers[uuid].Start(s.listenCtx, s.chOut)
+}
+
+func (s *scheduler) stopTicker(uuid uuid.UUID) {
+	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "stopping ticker", slog.Group("job", slog.String("id", uuid.String())))
+
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	delete(s.tickers, uuid)
+}
+
 func (s *scheduler) tickerExists(uuid uuid.UUID) bool {
-	var found bool
-	_, found = s.tickers[uuid]
-	return found
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	if _, found := s.tickers[uuid]; found {
+		return true
+	}
+	return false
+}
+
+func (s *scheduler) updateTicker(uuid uuid.UUID, schedule cron.Schedule) {
+	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "updating ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", schedule.String())))
+
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	s.tickers[uuid].Stop()
+	s.tickers[uuid].schedule = schedule
+	s.tickers[uuid].Start(s.listenCtx, s.chOut)
 }
