@@ -2,6 +2,7 @@ package task
 
 import "sync"
 
+// TODO Intercom REMOVE??
 type Intercom struct {
 	mux    sync.Mutex
 	errors []error
