@@ -41,7 +41,11 @@ func ExecuteSequence(ctx context.Context, l *slog.Logger, tasks []Task, r *Handl
 		}
 
 		// Wait for the result of the current task
+		var exit bool
 		for {
+			if exit {
+				break
+			}
 			select {
 			case <-ctx.Done():
 				return results, ctx.Err()
@@ -50,6 +54,7 @@ func ExecuteSequence(ctx context.Context, l *slog.Logger, tasks []Task, r *Handl
 					Status: result.Status,
 					Error:  result.Error,
 				}
+				exit = true
 			}
 		}
 	}
