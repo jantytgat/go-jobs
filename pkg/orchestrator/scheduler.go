@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+
+	"github.com/jantytgat/go-jobs/pkg/cron"
 )
 
 func newScheduler(chIn chan schedulerMessage, chOut chan schedulerTick) *scheduler {
@@ -57,11 +59,25 @@ func (s *scheduler) Stop() error {
 	return nil
 }
 
-func (s *scheduler) handleUpdate(u schedulerMessage) {
+func (s *scheduler) addTicker(uuid uuid.UUID, schedule cron.Schedule) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	if !s.tickerExists(u.uuid) {
-		s.tickers[u.uuid] = newSchedulerTicker(u.uuid, u.schedule)
+	s.tickers[uuid] = newSchedulerTicker(uuid, schedule)
+}
+
+func (s *scheduler) deleteTicker(uuid uuid.UUID) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	delete(s.tickers, uuid)
+}
+
+func (s *scheduler) handleUpdate(u schedulerMessage) {
+	// Only add new ticker if the uuid does not exist and the ticker must be enabled.
+	// If the ticker does not exist and it should be disabled, exit the function as no further action is required.
+	if !s.tickerExists(u.uuid) && u.enabled {
+		s.addTicker(u.uuid, u.schedule)
+	} else if !u.enabled {
+		return
 	}
 
 	switch u.enabled {
@@ -74,7 +90,7 @@ func (s *scheduler) handleUpdate(u schedulerMessage) {
 		if s.tickers[u.uuid].isRunning() {
 			s.tickers[u.uuid].Stop()
 		}
-		delete(s.tickers, u.uuid)
+		s.deleteTicker(u.uuid)
 	}
 }
 
