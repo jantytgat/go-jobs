@@ -27,8 +27,11 @@ type schedulerTicker struct {
 	mux          sync.Mutex
 }
 
+// TODO Start return error?
 func (s *schedulerTicker) Start(ctx context.Context, chTick chan schedulerTick) {
 	go s.tick(ctx, chTick)
+
+	// Wait until the ticker has started
 	for {
 		if s.isRunning() {
 			return
@@ -37,7 +40,11 @@ func (s *schedulerTicker) Start(ctx context.Context, chTick chan schedulerTick) 
 }
 
 func (s *schedulerTicker) Stop() {
-	s.tickerCancel()
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	if s.tickerCancel != nil {
+		s.tickerCancel()
+	}
 }
 
 func (s *schedulerTicker) isRunning() bool {
