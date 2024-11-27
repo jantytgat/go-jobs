@@ -43,7 +43,7 @@ func main() {
 			exit = true
 		default:
 			i++
-			hp.ChTasks <- task.HandlerTask{
+			hp.Input <- task.HandlerTask{
 				Task:     taskLibrary.PrintTask{Message: fmt.Sprintf("Task %04d", i)},
 				Pipeline: nil,
 				ChResult: chResult,
