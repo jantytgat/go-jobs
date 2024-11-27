@@ -204,16 +204,25 @@ func (o *Orchestrator) schedulerMessenger(ctx context.Context) {
 
 			jobs := o.Catalog.All()
 			for _, j := range jobs {
-				go func() {
-					o.logger.LogAttrs(ctx, slog.LevelDebug, "sending message to scheduler", slog.Group("job", slog.String("id", j.Uuid.String())))
-					o.chScheduler <- schedulerMessage{
-						uuid:     j.Uuid,
-						enabled:  j.Enabled,
-						schedule: j.Schedule,
-					}
-				}()
+				if !j.LimitRuns || (j.LimitRuns && o.Catalog.CountResults(j.Uuid) < j.MaxRuns) {
+					go func() {
+						o.chScheduler <- schedulerMessage{
+							uuid:     j.Uuid,
+							enabled:  j.Enabled,
+							schedule: j.Schedule,
+						}
+					}()
+				} else if j.LimitRuns && o.Catalog.CountResults(j.Uuid) == j.MaxRuns {
+					go func() {
+						o.chScheduler <- schedulerMessage{
+							uuid:     j.Uuid,
+							enabled:  false,
+							schedule: j.Schedule,
+						}
+					}()
+				}
 			}
-			time.Sleep(10 * time.Second) // TODO increase sleep time?
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
