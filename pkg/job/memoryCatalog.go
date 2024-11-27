@@ -72,6 +72,13 @@ func (c *MemoryCatalog) Count() int {
 	return len(c.jobs)
 }
 
+func (c *MemoryCatalog) CountResults(uuid uuid.UUID) int {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+
+	return len(c.results[uuid])
+}
+
 func (c *MemoryCatalog) Delete(uuid uuid.UUID) error {
 	c.mux.Lock()
 	defer c.mux.Unlock()
