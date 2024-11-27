@@ -133,19 +133,23 @@ func (s *scheduler) listen(ctx context.Context) {
 }
 
 func (s *scheduler) startTicker(uuid uuid.UUID, schedule cron.Schedule) {
-	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "starting ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", schedule.String())))
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
+	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "starting ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", schedule.String())))
 	s.tickers[uuid] = newSchedulerTicker(uuid, schedule)
 	s.tickers[uuid].Start(s.listenCtx, s.chOut)
 }
 
 func (s *scheduler) stopTicker(uuid uuid.UUID) {
-	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "stopping ticker", slog.Group("job", slog.String("id", uuid.String())))
-
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	delete(s.tickers, uuid)
+
+	if _, found := s.tickers[uuid]; found {
+		s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "stopping ticker", slog.Group("job", slog.String("id", uuid.String())))
+		s.tickers[uuid].Stop()
+		delete(s.tickers, uuid)
+	}
 }
 
 func (s *scheduler) tickerExists(uuid uuid.UUID) bool {
@@ -159,10 +163,10 @@ func (s *scheduler) tickerExists(uuid uuid.UUID) bool {
 }
 
 func (s *scheduler) updateTicker(uuid uuid.UUID, schedule cron.Schedule) {
-	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "updating ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", schedule.String())))
-
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
+	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "updating ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", schedule.String())))
 	s.tickers[uuid].Stop()
 	s.tickers[uuid].schedule = schedule
 	s.tickers[uuid].Start(s.listenCtx, s.chOut)

@@ -2,19 +2,34 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-func NewHandlerRepository() *HandlerRepository {
-	return &HandlerRepository{
+func NewHandlerRepository(name string, opts ...HandlerRepositoryOption) *HandlerRepository {
+	r := &HandlerRepository{
+		name:         name,
 		handlerPools: make(map[string]*HandlerPool),
 		mux:          sync.RWMutex{},
 	}
+
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	if r.reg == nil {
+		r.reg = prometheus.NewRegistry()
+	}
+	return r
 }
 
 type HandlerRepository struct {
+	name         string
 	handlerPools map[string]*HandlerPool
+	reg          prometheus.Registerer
 	mux          sync.RWMutex
 }
 
@@ -34,7 +49,7 @@ func (r *HandlerRepository) Execute(ctx context.Context, t HandlerTask) error {
 	}
 
 	// Send the task to the handler pool channel
-	handlerPool.ChTasks <- t
+	handlerPool.Input <- t
 	return nil
 }
 
@@ -80,6 +95,10 @@ func (r *HandlerRepository) registerHandlerPool(p *HandlerPool) error {
 	_, found := r.handlerPools[p.Name()]
 	if !found {
 		r.handlerPools[p.Name()] = p
+		handlerRepositoryMetrics.handlerPools.WithLabelValues(r.name).Inc()
+		if err := handlerPoolMetrics.Register(r.reg); err != nil && !errors.As(err, &prometheus.AlreadyRegisteredError{}) {
+			return err
+		}
 	}
 
 	return nil

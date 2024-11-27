@@ -7,11 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/jantytgat/go-jobs/pkg/job"
 	"github.com/jantytgat/go-jobs/pkg/task"
 )
 
-func New(logger *slog.Logger, maxRunners int, opts ...Option) (*Orchestrator, error) {
+func New(logger *slog.Logger, name string, maxRunners int, opts ...Option) (*Orchestrator, error) {
 	if logger == nil {
 		return nil, errors.New("logger required")
 	}
@@ -22,7 +24,12 @@ func New(logger *slog.Logger, maxRunners int, opts ...Option) (*Orchestrator, er
 	chResults := make(chan job.Result, maxRunners)
 	chDispatcher := make(chan dispatcherMessage, maxRunners)
 
+	if name == "" {
+		name = "orchestrator"
+	}
+
 	o := &Orchestrator{
+		name:         name,
 		scheduler:    newScheduler(logger, chScheduler, chTick),
 		dispatcher:   newDispatcher(logger, maxRunners, chDispatcher, chResults),
 		chScheduler:  chScheduler,
@@ -38,12 +45,16 @@ func New(logger *slog.Logger, maxRunners int, opts ...Option) (*Orchestrator, er
 		opt(o)
 	}
 
+	if o.reg == nil {
+		o.reg = prometheus.NewRegistry()
+	}
+
 	if o.Catalog == nil {
 		o.Catalog = job.NewMemoryCatalog()
 	}
 
 	if o.Handlers == nil {
-		o.Handlers = task.NewHandlerRepository()
+		o.Handlers = task.NewHandlerRepository(name, task.WithHandlerRepositoryPrometheusRegister(o.reg))
 	}
 
 	if o.queue == nil {
@@ -54,6 +65,7 @@ func New(logger *slog.Logger, maxRunners int, opts ...Option) (*Orchestrator, er
 }
 
 type Orchestrator struct {
+	name         string
 	ctx          context.Context
 	cancelFunc   context.CancelFunc
 	scheduler    *scheduler  // manages tickers for job schedule
@@ -67,6 +79,7 @@ type Orchestrator struct {
 	chResults    chan job.Result         // channel to get results from dispatcher
 	chTick       chan schedulerTick      // channel to receive ticks from scheduler
 	maxRunners   int
+	reg          prometheus.Registerer
 	mux          sync.Mutex
 }
 
