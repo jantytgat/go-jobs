@@ -12,7 +12,7 @@ import (
 	"github.com/jantytgat/go-jobs/pkg/cron"
 )
 
-func newScheduler(logger *slog.Logger, chIn chan schedulerMessage, chOut chan schedulerTick) *scheduler {
+func newScheduler(logger *slog.Logger, chIn chan schedulerMessage, chOut chan SchedulerTick) *scheduler {
 	s := &scheduler{
 		chIn:    chIn,
 		chOut:   chOut,
@@ -24,7 +24,7 @@ func newScheduler(logger *slog.Logger, chIn chan schedulerMessage, chOut chan sc
 
 type scheduler struct {
 	chIn             chan schedulerMessage
-	chOut            chan schedulerTick
+	chOut            chan SchedulerTick
 	listenCtx        context.Context
 	listenCancelFunc context.CancelFunc
 	tickers          map[uuid.UUID]*schedulerTicker
@@ -60,17 +60,20 @@ func (s *scheduler) Start(ctx context.Context) error {
 	}
 }
 
-func (s *scheduler) Stop() error {
+func (s *scheduler) Stop(ctx context.Context) {
 	s.mux.Lock()
-	defer s.mux.Unlock()
-
 	if s.listenCancelFunc == nil {
-		s.logger.LogAttrs(context.Background(), slog.LevelWarn, "scheduler has already been stopped")
-		return fmt.Errorf("scheduler has already been stopped")
+		s.logger.LogAttrs(context.Background(), slog.LevelWarn, "scheduler has stopped already")
+		return
 	}
+	s.mux.Unlock()
+
+	s.logger.LogAttrs(ctx, slog.LevelDebug, "dispatcher stopping")
 	s.listenCancelFunc()
+
+	s.mux.Lock()
 	s.listenCancelFunc = nil
-	return nil
+	s.mux.Unlock()
 }
 
 func (s *scheduler) getTicker(uuid uuid.UUID) *schedulerTicker {
@@ -82,20 +85,25 @@ func (s *scheduler) getTicker(uuid uuid.UUID) *schedulerTicker {
 func (s *scheduler) handleUpdate(u schedulerMessage) {
 	tickerExists := s.tickerExists(u.uuid)
 
-	// If the ticker does not exist and must be enabled, start a new ticker
-	if !tickerExists && u.enabled {
-		s.startTicker(u.uuid, u.schedule)
-		return
+	if !tickerExists {
+		switch u.enabled {
+		case true:
+			s.startTicker(u.uuid, u.schedule)
+			return
+		case false:
+			return
+		}
 	}
 
 	// The ticker exists and must be disabled
 	if !u.enabled {
-		s.stopTicker(u.uuid)
+		s.stopAndRemoveTicker(u.uuid)
 		return
 	}
 
 	// The ticker exists but the schedule has changed
-	if s.getTicker(u.uuid).schedule.String() != u.schedule.String() {
+	ticker := s.getTicker(u.uuid)
+	if ticker != nil && ticker.schedule.String() != u.schedule.String() {
 		s.updateTicker(u.uuid, u.schedule)
 		return
 	}
@@ -141,7 +149,7 @@ func (s *scheduler) startTicker(uuid uuid.UUID, schedule cron.Schedule) {
 	s.tickers[uuid].Start(s.listenCtx, s.chOut)
 }
 
-func (s *scheduler) stopTicker(uuid uuid.UUID) {
+func (s *scheduler) stopAndRemoveTicker(uuid uuid.UUID) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
@@ -166,8 +174,9 @@ func (s *scheduler) updateTicker(uuid uuid.UUID, schedule cron.Schedule) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
-	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "updating ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", schedule.String())))
 	s.tickers[uuid].Stop()
 	s.tickers[uuid].schedule = schedule
 	s.tickers[uuid].Start(s.listenCtx, s.chOut)
+	s.logger.LogAttrs(s.listenCtx, slog.LevelDebug, "updated ticker", slog.Group("job", slog.String("id", uuid.String()), slog.String("schedule", s.tickers[uuid].schedule.String())))
+
 }

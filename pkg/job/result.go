@@ -11,7 +11,7 @@ import (
 type Result struct {
 	Uuid        uuid.UUID
 	RunUuid     uuid.UUID
-	Trigger     time.Time
+	TriggerTime time.Time
 	RunTime     time.Duration
 	TaskResults []task.Result
 	Error       error

@@ -10,5 +10,5 @@ import (
 type dispatcherMessage struct {
 	job               job.Job
 	handlerRepository *task.HandlerRepository
-	trigger           time.Time
+	triggerTime       time.Time
 }

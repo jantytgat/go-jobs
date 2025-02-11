@@ -21,17 +21,17 @@ func newDispatcher(logger *slog.Logger, maxRunners int, chDispatcher chan dispat
 		maxRunners:   maxRunners,
 		chDispatcher: chDispatcher,
 		chResults:    chResults,
-		dispatchers:  make(map[int]context.CancelFunc),
+		runners:      make(map[int]context.CancelFunc),
 		logger:       logger,
 	}
 }
 
 type dispatcher struct {
 	maxRunners   int
-	cancel       context.CancelFunc
+	cancelFunc   context.CancelFunc
 	chDispatcher chan dispatcherMessage
 	chResults    chan job.Result
-	dispatchers  map[int]context.CancelFunc
+	runners      map[int]context.CancelFunc
 	logger       *slog.Logger
 	mux          sync.Mutex
 }
@@ -40,9 +40,9 @@ func (d *dispatcher) IsRunning() bool {
 	d.mux.Lock()
 	defer d.mux.Unlock()
 
-	if d.cancel != nil {
+	if d.cancelFunc != nil {
 		for i := 0; i < d.maxRunners; i++ {
-			if _, found := d.dispatchers[i]; !found {
+			if _, found := d.runners[i]; !found {
 				return false
 			}
 		}
@@ -52,10 +52,10 @@ func (d *dispatcher) IsRunning() bool {
 }
 
 func (d *dispatcher) Start(ctx context.Context) error {
-	var runnerCtx context.Context
-	runnerCtx, d.cancel = context.WithCancel(ctx)
+	var dispatchCtx context.Context
+	dispatchCtx, d.cancelFunc = context.WithCancel(ctx)
 
-	go d.run(runnerCtx)
+	go d.run(dispatchCtx)
 
 	startCtx, startCancel := context.WithTimeout(ctx, 1*time.Second)
 	defer startCancel()
@@ -74,8 +74,20 @@ func (d *dispatcher) Start(ctx context.Context) error {
 	}
 }
 
-func (d *dispatcher) Stop() {
-	d.cancel()
+func (d *dispatcher) Stop(ctx context.Context) {
+	d.mux.Lock()
+	if d.cancelFunc == nil {
+		d.logger.LogAttrs(ctx, slog.LevelWarn, "dispatcher has stopped already")
+		return
+	}
+	d.mux.Unlock()
+
+	d.logger.LogAttrs(ctx, slog.LevelDebug, "dispatcher stopping")
+	d.cancelFunc()
+
+	d.mux.Lock()
+	d.cancelFunc = nil
+	d.mux.Unlock()
 }
 
 func (d *dispatcher) run(ctx context.Context) {
@@ -84,63 +96,51 @@ func (d *dispatcher) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			d.mux.Lock()
 			for i := 0; i < d.maxRunners; i++ {
-				d.mux.Lock()
-				_, found := d.dispatchers[i]
-				d.mux.Unlock()
-
-				if !found {
-					d.newInstance(ctx, i)
+				if _, found := d.runners[i]; !found {
+					runnerCtx, runnerCancel := context.WithCancel(ctx)
+					d.runners[i] = runnerCancel
+					go d.launchRunner(runnerCtx, i)
 				}
-
 			}
-			// time.Sleep(1 * time.Second)
+			d.mux.Unlock()
 		}
 	}
 }
 
-func (d *dispatcher) newInstance(ctx context.Context, id int) {
+func (d *dispatcher) deleteRunner(id int) {
 	d.mux.Lock()
 	defer d.mux.Unlock()
 
-	dispatchCtx, dispatchCancel := context.WithCancel(ctx)
-	d.dispatchers[id] = dispatchCancel
-	go d.runInstance(dispatchCtx, id)
+	delete(d.runners, id)
 }
 
-func (d *dispatcher) removeInstance(id int) {
-	d.mux.Lock()
-	defer d.mux.Unlock()
+func (d *dispatcher) launchRunner(ctx context.Context, id int) {
+	d.logger.LogAttrs(ctx, slog.LevelDebug, "starting runner", slog.Group("runner", slog.Int("id", id)))
+	defer d.logger.LogAttrs(ctx, slog.LevelDebug, "stopping runner", slog.Group("runner", slog.Int("id", id)))
+	defer d.deleteRunner(id)
 
-	delete(d.dispatchers, id)
-}
-
-func (d *dispatcher) runInstance(ctx context.Context, id int) {
-	d.logger.LogAttrs(ctx, slog.LevelDebug, "starting dispatcher instance", slog.Group("dispatcher", slog.Int("id", id)))
-	defer d.logger.LogAttrs(ctx, slog.LevelDebug, "dispatcher instance stopped", slog.Group("dispatcher", slog.Int("id", id)))
-	defer d.removeInstance(id)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-d.chDispatcher:
-			startTime := time.Now()
-			l := d.logger.WithGroup("job").With(slog.Int("dispatcher_id", id), slog.String("id", msg.job.Uuid.String()))
-			runUuid := uuid.New()
-			l.LogAttrs(ctx, slog.LevelInfo, "job starting", slog.String("instance", runUuid.String()))
-			taskResults, err := task.ExecuteSequence(ctx, l, msg.job.Tasks, msg.handlerRepository)
-			l.LogAttrs(ctx, slog.LevelInfo, "job finished", slog.String("instance", runUuid.String()))
-			duration := time.Since(startTime)
-			result := job.Result{
-				Uuid:        msg.job.Uuid,
-				RunUuid:     uuid.New(),
-				Trigger:     msg.trigger,
-				RunTime:     duration,
-				TaskResults: taskResults,
-				Error:       err,
-			}
-			d.chResults <- result
+	d.logger.LogAttrs(ctx, slog.LevelDebug, "waiting for job", slog.Group("runner", slog.Int("id", id)))
+	select {
+	case <-ctx.Done():
+		return
+	case msg := <-d.chDispatcher:
+		startTime := time.Now()
+		l := d.logger.WithGroup("job").With(slog.Int("dispatcher_id", id), slog.String("id", msg.job.Uuid.String()))
+		runUuid := uuid.New()
+		l.LogAttrs(ctx, slog.LevelInfo, "job starting", slog.String("instance", runUuid.String()))
+		taskResults, err := task.ExecuteSequence(ctx, l, msg.job.Tasks, msg.handlerRepository)
+		l.LogAttrs(ctx, slog.LevelInfo, "job finished", slog.String("instance", runUuid.String()))
+		duration := time.Since(startTime)
+		result := job.Result{
+			Uuid:        msg.job.Uuid,
+			RunUuid:     uuid.New(),
+			TriggerTime: msg.triggerTime,
+			RunTime:     duration,
+			TaskResults: taskResults,
+			Error:       err,
 		}
+		d.chResults <- result
 	}
 }

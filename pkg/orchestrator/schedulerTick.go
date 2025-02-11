@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type schedulerTick struct {
+type SchedulerTick struct {
 	uuid uuid.UUID
 	time time.Time
 }

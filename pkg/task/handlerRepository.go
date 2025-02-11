@@ -49,7 +49,7 @@ func (r *HandlerRepository) Execute(ctx context.Context, t HandlerTask) error {
 	}
 
 	// Send the task to the handler pool channel
-	handlerPool.Input <- t
+	handlerPool.ChPoolInput <- t
 	return nil
 }
 

@@ -21,7 +21,7 @@ func NewHandlerPool(ctx context.Context, h Handler, maxWorkers int, opts ...Hand
 	for _, opt := range opts {
 		opt(p)
 	}
-	p.Input = make(chan HandlerTask, p.maxWorkers)
+	p.ChPoolInput = make(chan HandlerTask, p.maxWorkers)
 
 	go p.listen()
 	return p
@@ -36,7 +36,7 @@ type HandlerPool struct {
 	workers    int
 	handler    Handler
 
-	Input         chan HandlerTask
+	ChPoolInput   chan HandlerTask
 	chWorkerInput chan HandlerTask
 
 	mux sync.RWMutex
@@ -47,21 +47,29 @@ func (p *HandlerPool) Name() string {
 }
 
 func (p *HandlerPool) Statistics() HandlerPoolStatistics {
-	workers := GetMetricValue(handlerPoolMetrics.workers)
-	activeWorkers := GetMetricValue(handlerPoolMetrics.activeWorkers)
+	workers := GetMetricValue(handlerPoolMetrics.workers.WithLabelValues(p.handler.Name))
+	activeWorkers := GetMetricValue(handlerPoolMetrics.activeWorkers.WithLabelValues(p.handler.Name))
 	idleWorkers := workers - activeWorkers
-	maxWorkers := GetMetricValue(handlerPoolMetrics.maxWorkers)
-	tasksIngested := GetMetricValue(handlerPoolMetrics.tasksIngested)
-	tasksProcessed := GetMetricValue(handlerPoolMetrics.tasksProcessed)
-	tasksWaiting := GetMetricValue(handlerPoolMetrics.tasksWaiting)
+	maxWorkers := GetMetricValue(handlerPoolMetrics.maxWorkers.WithLabelValues(p.handler.Name))
+	tasksIngested := GetMetricValue(handlerPoolMetrics.tasksIngested.WithLabelValues(p.handler.Name))
+	tasksProcessedNone := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusNone.String()))
+	tasksProcessedPending := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusPending.String()))
+	tasksProcessedSuccess := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusSuccess.String()))
+	tasksProcessedCanceled := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusCanceled.String()))
+	tasksProcessedError := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusError.String()))
+	tasksWaiting := GetMetricValue(handlerPoolMetrics.tasksWaiting.WithLabelValues(p.handler.Name))
 	return HandlerPoolStatistics{
-		ActiveWorkers:  activeWorkers,
-		IdleWorkers:    idleWorkers,
-		Workers:        workers,
-		MaxWorkers:     maxWorkers,
-		TasksIngested:  tasksIngested,
-		TasksProcessed: tasksProcessed,
-		TasksWaiting:   tasksWaiting,
+		ActiveWorkers:                activeWorkers,
+		IdleWorkers:                  idleWorkers,
+		Workers:                      workers,
+		MaxWorkers:                   maxWorkers,
+		TasksIngested:                tasksIngested,
+		TasksProcessedStatusNone:     tasksProcessedNone,
+		TasksProcessedStatusPending:  tasksProcessedPending,
+		TasksProcessedStatusSuccess:  tasksProcessedSuccess,
+		TasksProcessedStatusCanceled: tasksProcessedCanceled,
+		TasksProcessedStatusError:    tasksProcessedError,
+		TasksWaiting:                 tasksWaiting,
 	}
 }
 func (p *HandlerPool) decreaseActiveWorkerCount() {
@@ -108,7 +116,7 @@ func (p *HandlerPool) listen() {
 		select {
 		case <-p.ctx.Done():
 			exit = true
-		case ht, ok := <-p.Input:
+		case ht, ok := <-p.ChPoolInput:
 			if !ok {
 				exit = true
 			}

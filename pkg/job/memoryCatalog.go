@@ -102,6 +102,32 @@ func (c *MemoryCatalog) Get(uuid uuid.UUID) (Job, error) {
 	return c.jobs[uuid], nil
 }
 
+func (c *MemoryCatalog) GetNotSchedulable() []Job {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+
+	var jobs []Job
+	for id, job := range c.jobs {
+		if _, ok := c.results[id]; !ok {
+			continue
+		}
+
+		if !job.LimitRuns {
+			continue
+		}
+
+		if job.LimitRuns {
+			switch len(c.results[id]) == job.MaxRuns {
+			case true:
+				jobs = append(jobs, job)
+			default:
+				continue
+			}
+		}
+	}
+	return jobs
+}
+
 func (c *MemoryCatalog) GetResults(uuid uuid.UUID) ([]Result, error) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
@@ -111,6 +137,29 @@ func (c *MemoryCatalog) GetResults(uuid uuid.UUID) ([]Result, error) {
 	}
 
 	return c.results[uuid], nil
+}
+
+func (c *MemoryCatalog) GetSchedulable() []Job {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+
+	var jobs []Job
+	for id, job := range c.jobs {
+		if _, ok := c.results[id]; !ok {
+			jobs = append(jobs, job)
+			continue
+		}
+
+		if !job.LimitRuns {
+			jobs = append(jobs, job)
+			continue
+		}
+
+		if job.LimitRuns && len(c.results[id]) <= job.MaxRuns {
+			jobs = append(jobs, job)
+		}
+	}
+	return jobs
 }
 
 func (c *MemoryCatalog) Statistics() CatalogStatistics {
