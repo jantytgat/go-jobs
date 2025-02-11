@@ -1,7 +1,7 @@
 package orchestrator
 
 type Queue interface {
-	Push(t schedulerTick)
-	Pop() (schedulerTick, error)
+	Push(t SchedulerTick)
+	Pop() (SchedulerTick, error)
 	Length() int
 }

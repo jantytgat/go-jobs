@@ -13,11 +13,17 @@ func Execute(ctx context.Context, l *slog.Logger, task Task, r *HandlerRepositor
 	}
 
 	// Wait for the result of the current task
-	result := <-chResults
-	return Result{
-		Status: result.Status,
-		Error:  result.Error,
-	}, nil
+	for {
+		select {
+		case <-ctx.Done():
+			return Result{}, ctx.Err()
+		case result := <-chResults:
+			return Result{
+				Status: result.Status,
+				Error:  result.Error,
+			}, nil
+		}
+	}
 }
 
 func ExecuteSequence(ctx context.Context, l *slog.Logger, tasks []Task, r *HandlerRepository) ([]Result, error) {
@@ -31,14 +37,25 @@ func ExecuteSequence(ctx context.Context, l *slog.Logger, tasks []Task, r *Handl
 		// The handler pool will send the result of the task to s.chResults.
 		// Any data that needs to be passed on through the sequence of tasks is stored in the pipeline by the task handler.
 		if err := r.Execute(ctx, NewHandlerTaskWithChannel(task, pipeline, chResults)); err != nil {
-			return nil, err
+			return results, err
 		}
 
 		// Wait for the result of the current task
-		result := <-chResults
-		results[i] = Result{
-			Status: result.Status,
-			Error:  result.Error,
+		var exit bool
+		for {
+			if exit {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return results, ctx.Err()
+			case result := <-chResults:
+				results[i] = Result{
+					Status: result.Status,
+					Error:  result.Error,
+				}
+				exit = true
+			}
 		}
 	}
 	return results, nil

@@ -6,8 +6,9 @@ import (
 	"sync"
 )
 
-func NewHandlerPool(ctx context.Context, h Handler, maxWorkers int) *HandlerPool {
+func NewHandlerPool(ctx context.Context, h Handler, maxWorkers int, opts ...HandlerPoolOption) *HandlerPool {
 	workerCtx, workerCancel := context.WithCancel(ctx)
+
 	p := &HandlerPool{
 		ctx:           ctx,
 		workerCtx:     workerCtx,
@@ -17,7 +18,10 @@ func NewHandlerPool(ctx context.Context, h Handler, maxWorkers int) *HandlerPool
 		chWorkerInput: make(chan HandlerTask),
 	}
 
-	p.ChTasks = make(chan HandlerTask, p.maxWorkers)
+	for _, opt := range opts {
+		opt(p)
+	}
+	p.ChPoolInput = make(chan HandlerTask, p.maxWorkers)
 
 	go p.listen()
 	return p
@@ -28,13 +32,11 @@ type HandlerPool struct {
 	workerCtx    context.Context
 	workerCancel context.CancelFunc
 
-	workers        int
-	maxWorkers     int
-	activeWorkers  int
-	tasksProcessed int
-	handler        Handler
+	maxWorkers int
+	workers    int
+	handler    Handler
 
-	ChTasks       chan HandlerTask
+	ChPoolInput   chan HandlerTask
 	chWorkerInput chan HandlerTask
 
 	mux sync.RWMutex
@@ -45,30 +47,65 @@ func (p *HandlerPool) Name() string {
 }
 
 func (p *HandlerPool) Statistics() HandlerPoolStatistics {
-	p.mux.Lock()
-	defer p.mux.Unlock()
+	workers := GetMetricValue(handlerPoolMetrics.workers.WithLabelValues(p.handler.Name))
+	activeWorkers := GetMetricValue(handlerPoolMetrics.activeWorkers.WithLabelValues(p.handler.Name))
+	idleWorkers := workers - activeWorkers
+	maxWorkers := GetMetricValue(handlerPoolMetrics.maxWorkers.WithLabelValues(p.handler.Name))
+	tasksIngested := GetMetricValue(handlerPoolMetrics.tasksIngested.WithLabelValues(p.handler.Name))
+	tasksProcessedNone := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusNone.String()))
+	tasksProcessedPending := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusPending.String()))
+	tasksProcessedSuccess := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusSuccess.String()))
+	tasksProcessedCanceled := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusCanceled.String()))
+	tasksProcessedError := GetMetricValue(handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, StatusError.String()))
+	tasksWaiting := GetMetricValue(handlerPoolMetrics.tasksWaiting.WithLabelValues(p.handler.Name))
 	return HandlerPoolStatistics{
-		ActiveWorkers:  p.activeWorkers,
-		IdleWorkers:    p.workers - p.activeWorkers,
-		Workers:        p.workers,
-		MaxWorkers:     p.maxWorkers,
-		TasksProcessed: p.tasksProcessed,
+		ActiveWorkers:                activeWorkers,
+		IdleWorkers:                  idleWorkers,
+		Workers:                      workers,
+		MaxWorkers:                   maxWorkers,
+		TasksIngested:                tasksIngested,
+		TasksProcessedStatusNone:     tasksProcessedNone,
+		TasksProcessedStatusPending:  tasksProcessedPending,
+		TasksProcessedStatusSuccess:  tasksProcessedSuccess,
+		TasksProcessedStatusCanceled: tasksProcessedCanceled,
+		TasksProcessedStatusError:    tasksProcessedError,
+		TasksWaiting:                 tasksWaiting,
 	}
+}
+func (p *HandlerPool) decreaseActiveWorkerCount() {
+	handlerPoolMetrics.activeWorkers.WithLabelValues(p.handler.Name).Dec()
 }
 
 func (p *HandlerPool) decreaseWorkerCount() {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	p.workers--
+	handlerPoolMetrics.workers.WithLabelValues(p.handler.Name).Dec()
+}
+
+func (p *HandlerPool) decreaseTasksWaiting() {
+	handlerPoolMetrics.tasksWaiting.WithLabelValues(p.handler.Name).Dec()
+}
+
+func (p *HandlerPool) increaseActiveWorkerCount() {
+	handlerPoolMetrics.activeWorkers.WithLabelValues(p.handler.Name).Inc()
+}
+
+func (p *HandlerPool) increaseTasksIngestedCount() {
+	handlerPoolMetrics.tasksIngested.WithLabelValues(p.handler.Name).Inc()
+}
+
+func (p *HandlerPool) increaseTasksProcessedCount(status Status) {
+	handlerPoolMetrics.tasksProcessed.WithLabelValues(p.handler.Name, status.String()).Inc()
+}
+
+func (p *HandlerPool) increaseTasksWaiting() {
+	handlerPoolMetrics.tasksWaiting.WithLabelValues(p.handler.Name).Inc()
 }
 
 func (p *HandlerPool) listen() {
-	p.mux.Lock()
-	for i := 0; i < p.maxWorkers; i++ {
-		p.workers++
-		go p.runWorker(p.workerCtx)
-	}
-	p.mux.Unlock()
+	// Make sure all workers have started before accepting tasks
+	p.launchWorkers()
 
 	var exit bool
 	for {
@@ -79,21 +116,31 @@ func (p *HandlerPool) listen() {
 		select {
 		case <-p.ctx.Done():
 			exit = true
-		case ht, ok := <-p.ChTasks:
+		case ht, ok := <-p.ChPoolInput:
 			if !ok {
 				exit = true
 			}
+			p.increaseTasksIngestedCount()
+			p.increaseTasksWaiting()
 			p.chWorkerInput <- ht
+			p.decreaseTasksWaiting()
 		default:
-			p.mux.Lock()
-			if p.workers < p.maxWorkers {
-				p.workers++
-				go p.runWorker(p.workerCtx)
-			}
-			p.mux.Unlock()
+			p.launchWorkers()
 		}
 	}
 	p.workerCancel()
+}
+
+func (p *HandlerPool) launchWorkers() {
+	p.mux.Lock()
+	defer p.mux.Unlock()
+	if p.workers < p.maxWorkers {
+		for i := 0; i < p.maxWorkers-p.workers; i++ {
+			p.workers++
+			handlerPoolMetrics.workers.WithLabelValues(p.handler.Name).Inc()
+			go p.runWorker(p.workerCtx)
+		}
+	}
 }
 
 func (p *HandlerPool) runWorker(ctx context.Context) {
@@ -108,9 +155,7 @@ func (p *HandlerPool) runWorker(ctx context.Context) {
 		case <-ctx.Done():
 			exit = true
 		case t := <-p.chWorkerInput:
-			p.mux.Lock()
-			p.activeWorkers++
-			p.mux.Unlock()
+			p.increaseActiveWorkerCount()
 
 			status, err := p.handler.Execute(ctx, t.Task, t.Pipeline)
 			if t.ChResult != nil {
@@ -121,10 +166,8 @@ func (p *HandlerPool) runWorker(ctx context.Context) {
 				}
 			}
 
-			p.mux.Lock()
-			p.tasksProcessed++
-			p.activeWorkers--
-			p.mux.Unlock()
+			p.increaseTasksProcessedCount(status)
+			p.decreaseActiveWorkerCount()
 		}
 	}
 }
