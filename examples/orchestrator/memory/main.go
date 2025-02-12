@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+
 	"github.com/jantytgat/go-jobs/pkg/cron"
 	"github.com/jantytgat/go-jobs/pkg/job"
 	"github.com/jantytgat/go-jobs/pkg/orchestrator"
@@ -48,11 +49,13 @@ func main() {
 	}()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	maxWorkers := runtime.NumCPU()
 	maxJobs := runtime.NumCPU() * 2
+
 	// maxJobs = 10
 	if o, err = orchestrator.New(logger, "example", maxJobs, orchestrator.WithPrometheusRegistry(reg)); err != nil {
 		panic(err)
@@ -61,6 +64,7 @@ func main() {
 		task.NewHandlerPool(ctx, taskLibrary.EmptyTaskHandler(5*time.Second), maxWorkers*2, task.WithHandlerPoolPrometheusRegister(reg), task.WithHandlerPoolRecycling(200)),
 		task.NewHandlerPool(ctx, taskLibrary.LogTaskHandler(5*time.Second), maxWorkers*3, task.WithHandlerPoolPrometheusRegister(reg), task.WithHandlerPoolRecycling(300)),
 		task.NewHandlerPool(ctx, taskLibrary.EmptyErrorTaskHandler(5*time.Second), maxWorkers*4, task.WithHandlerPoolPrometheusRegister(reg), task.WithHandlerPoolRecycling(400)),
+
 	}); err != nil {
 		panic(err)
 	}
@@ -130,6 +134,7 @@ func main() {
 	fmt.Println("STARTING")
 	_ = o.Start(ctx)
 	time.Sleep(60 * time.Second)
+
 	fmt.Println("STOPPING")
 	o.Stop()
 	cancel()

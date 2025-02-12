@@ -23,6 +23,8 @@ func NewHandlerPool(ctx context.Context, h Handler, maxWorkers int, opts ...Hand
 		opt(p)
 	}
 
+	p.ChPoolInput = make(chan HandlerTask, p.maxWorkers)
+
 	go p.listen(ctx)
 	return p
 }
@@ -55,6 +57,7 @@ func (p *HandlerPool) Statistics() HandlerPoolStatistics {
 	activeWorkers := GetMetricValue(handlerPoolMetrics.activeWorkers.WithLabelValues(p.handler.Name))
 	workers := GetMetricValue(handlerPoolMetrics.workers.WithLabelValues(p.handler.Name))
 	idleWorkers := workers - activeWorkers
+
 	return HandlerPoolStatistics{
 		ActiveWorkers:                activeWorkers,
 		IdleWorkers:                  idleWorkers,
@@ -70,6 +73,7 @@ func (p *HandlerPool) Statistics() HandlerPoolStatistics {
 		TasksWaiting:                 GetMetricValue(handlerPoolMetrics.tasksWaiting.WithLabelValues(p.handler.Name)),
 	}
 }
+
 func (p *HandlerPool) decreaseActiveWorkerCount() {
 	handlerPoolMetrics.activeWorkers.WithLabelValues(p.handler.Name).Dec()
 }
@@ -138,6 +142,7 @@ Listen:
 			if !ok {
 				break Listen
 			}
+      
 			p.sendToWorker(ht)
 		}
 	}
@@ -175,6 +180,18 @@ Cleanup:
 			} else {
 				time.Sleep(200 * time.Millisecond)
 			}
+		}
+	}
+}
+
+func (p *HandlerPool) launchWorkers() {
+	p.mux.Lock()
+	defer p.mux.Unlock()
+	if p.workers < p.maxWorkers {
+		for i := 0; i < p.maxWorkers-p.workers; i++ {
+			p.workers++
+			handlerPoolMetrics.workers.WithLabelValues(p.handler.Name).Inc()
+			go p.runWorker(p.workerCtx)
 		}
 	}
 }
