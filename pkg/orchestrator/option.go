@@ -1,7 +1,7 @@
 package orchestrator
 
 import (
-	"log/slog"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/jantytgat/go-jobs/pkg/job"
 	"github.com/jantytgat/go-jobs/pkg/task"
@@ -21,9 +21,11 @@ func WithHandlerRepository(r *task.HandlerRepository) Option {
 	}
 }
 
-func WithLogger(l *slog.Logger) Option {
+func WithPrometheusRegistry(reg prometheus.Registerer) Option {
 	return func(o *Orchestrator) {
-		o.logger = l
+		o.reg = prometheus.WrapRegistererWith(map[string]string{"orchestrator": o.name}, reg)
+		_ = metrics.Register(o.reg)
+
 	}
 }
 

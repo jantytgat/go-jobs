@@ -9,15 +9,15 @@ func WithConcurrencyLimit(limit int) Option {
 	}
 }
 
+func WithDisabled() Option {
+	return func(j *Job) {
+		j.Enabled = false
+	}
+}
+
 func WithRunLimit(limit int) Option {
 	return func(j *Job) {
 		j.LimitRuns = true
 		j.MaxRuns = limit
-	}
-}
-
-func WithDisabled() Option {
-	return func(j *Job) {
-		j.Enabled = false
 	}
 }

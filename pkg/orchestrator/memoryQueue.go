@@ -10,21 +10,20 @@ func NewMemoryQueue() *MemoryQueue {
 }
 
 type MemoryQueue struct {
-	queue []schedulerTick
-
-	mux sync.Mutex
+	queue []SchedulerTick
+	mux   sync.Mutex
 }
 
-func (q *MemoryQueue) Push(t schedulerTick) {
+func (q *MemoryQueue) Push(t SchedulerTick) {
 	q.mux.Lock()
 	defer q.mux.Unlock()
 
 	q.queue = append(q.queue, t)
 }
 
-func (q *MemoryQueue) Pop() (schedulerTick, error) {
+func (q *MemoryQueue) Pop() (SchedulerTick, error) {
 	if q.Length() == 0 {
-		return schedulerTick{}, errors.New("empty queue")
+		return SchedulerTick{}, errors.New("empty queue")
 	}
 	q.mux.Lock()
 	defer q.mux.Unlock()

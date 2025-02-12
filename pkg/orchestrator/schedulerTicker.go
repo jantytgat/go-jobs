@@ -27,8 +27,11 @@ type schedulerTicker struct {
 	mux          sync.Mutex
 }
 
-func (s *schedulerTicker) Start(ctx context.Context, chTick chan schedulerTick) {
+// TODO Start return error?
+func (s *schedulerTicker) Start(ctx context.Context, chTick chan SchedulerTick) {
 	go s.tick(ctx, chTick)
+
+	// Wait until the ticker has started
 	for {
 		if s.isRunning() {
 			return
@@ -37,7 +40,11 @@ func (s *schedulerTicker) Start(ctx context.Context, chTick chan schedulerTick) 
 }
 
 func (s *schedulerTicker) Stop() {
-	s.tickerCancel()
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	if s.tickerCancel != nil {
+		s.tickerCancel()
+	}
 }
 
 func (s *schedulerTicker) isRunning() bool {
@@ -51,8 +58,8 @@ func (s *schedulerTicker) isRunning() bool {
 }
 
 // Listen on the scheduler channel chTime for triggers from the tickers.
-// When a time tick is received, create a scheduler schedulerTick and forward it
-func (s *schedulerTicker) tick(ctx context.Context, chTick chan schedulerTick) {
+// When a time tick is received, create a scheduler SchedulerTick and forward it
+func (s *schedulerTicker) tick(ctx context.Context, chTick chan SchedulerTick) {
 	s.mux.Lock()
 	var tickerCtx context.Context
 	tickerCtx, s.tickerCancel = context.WithCancel(ctx)
@@ -69,7 +76,7 @@ func (s *schedulerTicker) tick(ctx context.Context, chTick chan schedulerTick) {
 		case <-tickerCtx.Done():
 			return
 		case t := <-s.chTime:
-			chTick <- schedulerTick{
+			chTick <- SchedulerTick{
 				uuid: s.Uuid,
 				time: t,
 			}

@@ -15,7 +15,7 @@ func main() {
 	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
 	logger := slog.New(logHandler)
 
-	r := task.NewHandlerRepository()
+	r := task.NewHandlerRepository("sequencePing")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
