@@ -142,7 +142,7 @@ Listen:
 			if !ok {
 				break Listen
 			}
-      
+
 			p.sendToWorker(ht)
 		}
 	}
@@ -180,18 +180,6 @@ Cleanup:
 			} else {
 				time.Sleep(200 * time.Millisecond)
 			}
-		}
-	}
-}
-
-func (p *HandlerPool) launchWorkers() {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	if p.workers < p.maxWorkers {
-		for i := 0; i < p.maxWorkers-p.workers; i++ {
-			p.workers++
-			handlerPoolMetrics.workers.WithLabelValues(p.handler.Name).Inc()
-			go p.runWorker(p.workerCtx)
 		}
 	}
 }
