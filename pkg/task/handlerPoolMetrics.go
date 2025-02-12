@@ -95,7 +95,6 @@ type HandlerPoolMetrics struct {
 	tasksIngested   *prometheus.CounterVec
 	tasksProcessed  *prometheus.CounterVec
 	tasksWaiting    *prometheus.GaugeVec
-
 }
 
 func (m *HandlerPoolMetrics) Register(reg prometheus.Registerer) error {
