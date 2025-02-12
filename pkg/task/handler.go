@@ -21,19 +21,19 @@ type Handler struct {
 }
 
 func (h Handler) Execute(ctx context.Context, t Task, p *Pipeline) (Status, error) {
-	chHandlerOutput := make(chan error, 1)
 	handlerCtx, handlerCancel := context.WithTimeout(ctx, h.timeout)
 	defer handlerCancel()
 
-	go func(ctx context.Context, t Task, p *Pipeline) {
-		chHandlerOutput <- h.execute(ctx, t, p)
-	}(handlerCtx, t, p)
+	chHandlerOutput := make(chan error, 1)
+
+	go func(ctx context.Context, t Task, p *Pipeline, chOut chan error) {
+		defer close(chOut)
+		chOut <- h.execute(ctx, t, p)
+	}(handlerCtx, t, p, chHandlerOutput)
 
 	select {
-	case <-ctx.Done():
-		return StatusCanceled, fmt.Errorf("handler context canceled: %w", ctx.Err())
 	case <-handlerCtx.Done():
-		return StatusCanceled, fmt.Errorf("handler timeout for %s after %d seconds", h.Name, h.timeout)
+		return StatusCanceled, fmt.Errorf("handler context canceled for %s: %w", h.Name, handlerCtx.Err())
 	case err := <-chHandlerOutput:
 		if err != nil {
 			return StatusError, err

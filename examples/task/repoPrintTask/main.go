@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	r := task.NewHandlerRepository()
+	r := task.NewHandlerRepository("repoPrintTask")
 	ctx, cancel := context.WithCancel(context.Background())
 	chResult := make(chan task.HandlerResult, 2000)
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"runtime"
 	"sync"
@@ -12,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 
 	"github.com/jantytgat/go-jobs/pkg/cron"
 	"github.com/jantytgat/go-jobs/pkg/job"
@@ -21,6 +25,7 @@ import (
 )
 
 func main() {
+
 	var err error
 	var o *orchestrator.Orchestrator
 
@@ -32,28 +37,43 @@ func main() {
 		collectors.NewBuildInfoCollector(),
 	)
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+		fmt.Println(http.ListenAndServe("localhost:6061", mux))
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
+	go func() {
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	maxWorkers := runtime.NumCPU()
-	maxJobs := runtime.NumCPU()
+	maxJobs := runtime.NumCPU() * 2
+
 	// maxJobs = 10
 	if o, err = orchestrator.New(logger, "example", maxJobs, orchestrator.WithPrometheusRegistry(reg)); err != nil {
 		panic(err)
 	}
 	if err = o.Handlers.RegisterHandlerPools([]*task.HandlerPool{
-		task.NewHandlerPool(ctx, taskLibrary.EmptyTaskHandler(5*time.Second), maxWorkers, task.WithHandlerPoolPrometheusRegister(reg)),
-		task.NewHandlerPool(ctx, taskLibrary.LogTaskHandler(5*time.Second), maxWorkers, task.WithHandlerPoolPrometheusRegister(reg)),
-		task.NewHandlerPool(ctx, taskLibrary.EmptyErrorTaskHandler(5*time.Second), maxWorkers, task.WithHandlerPoolPrometheusRegister(reg)),
+		task.NewHandlerPool(ctx, taskLibrary.EmptyTaskHandler(5*time.Second), maxWorkers*2, task.WithHandlerPoolPrometheusRegister(reg), task.WithHandlerPoolRecycling(200)),
+		task.NewHandlerPool(ctx, taskLibrary.LogTaskHandler(5*time.Second), maxWorkers*3, task.WithHandlerPoolPrometheusRegister(reg), task.WithHandlerPoolRecycling(300)),
+		task.NewHandlerPool(ctx, taskLibrary.EmptyErrorTaskHandler(5*time.Second), maxWorkers*4, task.WithHandlerPoolPrometheusRegister(reg), task.WithHandlerPoolRecycling(400)),
+
 	}); err != nil {
 		panic(err)
 	}
 	wg := &sync.WaitGroup{}
+
 	wg.Add(1)
 	go func(wg *sync.WaitGroup) {
 		defer wg.Done()
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 10000; i++ {
 			var schedule cron.Schedule
 			if i%2 == 0 {
 				schedule, _ = cron.NewSchedule("*/2 * * * * *")
@@ -66,7 +86,7 @@ func main() {
 			}
 			schedule = cron.EverySecond()
 			t := make([]task.Task, 0)
-			t = append(t, taskLibrary.LogTask{Message: fmt.Sprintf("Hello %d", i)})
+			t = append(t, taskLibrary.LogTask{Message: fmt.Sprintf("Hello %d", i), Level: slog.LevelDebug})
 			t = append(t, taskLibrary.EmptyTask{})
 			// t = append(t, taskLibrary.PrintTask{Message: fmt.Sprintf("this %d", i)})
 			t = append(t, taskLibrary.EmptyErrorTask{})
@@ -76,12 +96,15 @@ func main() {
 			// t = append(t, taskLibrary.EmptyTask{})
 			// t = append(t, taskLibrary.PrintTask{Message: fmt.Sprintf("message %d", i)})
 			// t = append(t, taskLibrary.EmptyTask{})
-			t = append(t, taskLibrary.LogTask{Message: fmt.Sprintf("Goodbye %d", i)})
+			t = append(t, taskLibrary.LogTask{Message: fmt.Sprintf("Goodbye %d", i), Level: slog.LevelDebug})
 			var j job.Job
 			if i%2 == 0 {
-				j = job.New(uuid.New(), fmt.Sprintf("%s-%d", "sequenceJob", i), schedule, t, job.WithRunLimit(2))
+				j = job.New(uuid.New(), fmt.Sprintf("%s-%d", "sequenceJob", i), schedule, t, job.WithRunLimit(20))
+			} else if i%3 == 0 {
+				j = job.New(uuid.New(), fmt.Sprintf("%s-%d", "sequenceJob", i), schedule, t, job.WithRunLimit(30))
+
 			} else {
-				j = job.New(uuid.New(), fmt.Sprintf("%s-%d", "sequenceJob", i), schedule, t, job.WithRunLimit(1))
+				j = job.New(uuid.New(), fmt.Sprintf("%s-%d", "sequenceJob", i), schedule, t)
 			}
 
 			if err = o.Catalog.Add(j); err != nil {
@@ -110,7 +133,8 @@ func main() {
 
 	fmt.Println("STARTING")
 	_ = o.Start(ctx)
-	time.Sleep(10 * time.Second)
+	time.Sleep(60 * time.Second)
+
 	fmt.Println("STOPPING")
 	o.Stop()
 	cancel()

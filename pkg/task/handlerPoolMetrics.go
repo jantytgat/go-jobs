@@ -46,6 +46,15 @@ func NewHandlerPoolMetrics() *HandlerPoolMetrics {
 		},
 			[]string{"handler"}),
 
+		recycledWorkers: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace:   "",
+			Subsystem:   "",
+			Name:        "workers_recycled",
+			Help:        "",
+			ConstLabels: nil,
+		},
+			[]string{"handler"}),
+
 		tasksIngested: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace:   "",
 			Subsystem:   "",
@@ -78,13 +87,15 @@ func NewHandlerPoolMetrics() *HandlerPoolMetrics {
 }
 
 type HandlerPoolMetrics struct {
-	maxWorkers     *prometheus.GaugeVec
-	workers        *prometheus.GaugeVec
-	activeWorkers  *prometheus.GaugeVec
-	idleWorkers    *prometheus.GaugeVec
-	tasksIngested  *prometheus.CounterVec
-	tasksProcessed *prometheus.CounterVec
-	tasksWaiting   *prometheus.GaugeVec
+	maxWorkers      *prometheus.GaugeVec
+	workers         *prometheus.GaugeVec
+	activeWorkers   *prometheus.GaugeVec
+	idleWorkers     *prometheus.GaugeVec
+	recycledWorkers *prometheus.CounterVec
+	tasksIngested   *prometheus.CounterVec
+	tasksProcessed  *prometheus.CounterVec
+	tasksWaiting    *prometheus.GaugeVec
+
 }
 
 func (m *HandlerPoolMetrics) Register(reg prometheus.Registerer) error {
@@ -99,6 +110,9 @@ func (m *HandlerPoolMetrics) Register(reg prometheus.Registerer) error {
 		return err
 	}
 	if err = reg.Register(handlerPoolMetrics.idleWorkers); err != nil && !errors.As(err, &prometheus.AlreadyRegisteredError{}) {
+		return err
+	}
+	if err = reg.Register(handlerPoolMetrics.recycledWorkers); err != nil && !errors.As(err, &prometheus.AlreadyRegisteredError{}) {
 		return err
 	}
 	if err = reg.Register(handlerPoolMetrics.tasksIngested); err != nil && !errors.As(err, &prometheus.AlreadyRegisteredError{}) {
